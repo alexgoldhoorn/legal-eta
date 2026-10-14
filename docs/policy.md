@@ -5,7 +5,9 @@ Planning aid, not legal advice.
 Two things configure a plan:
 
 - **Rules** (`rules.preset`, `rules.overrides`): the numeric constants of Regulation (EC) 561/2006.
-  One preset, `eu561`. Overrides are integer minutes (or booleans); unknown names are rejected.
+  One preset, `eu561`. Overrides are integer minutes (or booleans); unknown names are rejected. Minutes
+  must be greater than 0; the four counts (`extended_days_per_week`, `reduced_daily_rests_between_weekly`,
+  `compensation_deadline_weeks`, `ferry_interruptions_max`) may be 0 but not negative.
   The response echoes what was used under `rules.effective`.
 - **Policy** (`policy.preset`, `policy.overrides`): preferences about *where* and *when* legal
   breaks and rests are placed. Legality is never traded for a preference, and never for lateness: a
@@ -23,9 +25,9 @@ Two things configure a plan:
 | `daily_rest_type` | `reduced_eager`, `regular`, `reduced_when_needed` | `regular`: 11 h rests. `reduced_when_needed`: 9 h only when a window or limit needs it. `reduced_eager`: 9 h whenever one of the three is left. |
 | `split_daily_rest` | `allow`, `never` | 3 h + 9 h split daily rest. |
 | `extended_driving` | `eager`, `never`, `when_needed` | 10 h driving days (twice a week). `when_needed`: only taken when a delivery window would otherwise be missed. |
-| `rest_places` | `anywhere`, `prefer_tagged`, `tagged_only` | Rests at stops tagged in the route (`tags`). `prefer_tagged` carries a penalty of 60 for a rest elsewhere. |
-| `rest_place_lookahead_minutes` | `90` | How far ahead a tagged place is looked for. |
-| `rest_start_window` | `null` or `{earliest, latest, hard?, weight?}` | Daily window (local `HH:MM`, may cross midnight) in which a daily rest should start. `hard: true` removes choices outside it; otherwise it is a soft preference: a rest started outside it costs `weight` x 60. |
+| `rest_places` | `anywhere`, `prefer_tagged`, `tagged_only` | Rests at rest places: stops whose `tags` contain `"rest"`, and a ferry's cabin. The roadside and stops without that tag are not rest places (other tags such as `"depot"` are not read). `prefer_tagged` carries a penalty of 60 for a rest elsewhere; `tagged_only` removes such rests. |
+| `rest_place_lookahead_minutes` | `90` | How far ahead of the daily rest deadline a stop is offered as a rest place. |
+| `rest_start_window` | `null` or `{earliest, latest, hard?, weight?}` | Daily window (local `HH:MM`, may cross midnight; `earliest` and `latest` must differ) in which a daily rest should start. `hard` must be a JSON boolean: `true` removes choices outside it; otherwise it is a soft preference: a rest started outside it costs `weight` x 60 (`weight` is a number >= 0, default 1). |
 | `extend_rest_to` | `null` or `HH:MM` | Stretch a rest so it ends at this local time. Bounded by `extend_rest_max_minutes`; never applied to a rest on a ferry. |
 | `extend_rest_max_minutes` | `360` | Most that `extend_rest_to` may add to one rest. |
 | `weekly_rest_type` | `reduced_when_needed`, `regular`, `reduced_eager` | 45 h or 24 h weekly rests. A reduced weekly rest carries compensation. |
@@ -40,10 +42,17 @@ Two things configure a plan:
   inside its 24 h period counts as reduced; the subtype `reduced` can therefore appear on an 11 h
   block. When the policy asked for regular rests this raises `DAILY_REST_REDUCED_BY_WINDOW`.
 - **Hard windows fall back.** If a hard `rest_start_window` (or `tagged_only`) would leave only weekly
-  rests or nothing at all, the choices are restored and `PREFERENCE_UNMET:<knob>` is raised.
-- **Compensation.** The compensation for a reduced weekly rest is attached to the next weekly rest
-  (or to an earlier daily rest if the deadline is nearer) and kept as one aggregate debt, shown as
-  `compensation_minutes` on the rest block.
+  rests or nothing at all, the choices are restored and `PREFERENCE_UNMET:<knob>` is raised. The restored
+  choices still carry the knob's cost (60, or `weight` x 60), so the planner keeps preferring a rest
+  that honours the knob at an earlier stop. A rest that is the only legal option at a stop or port
+  (taken before the service or boarding) is ranked by the knobs the same way.
+- **Compensation.** The compensation for a reduced weekly rest is attached to the next weekly rest, or
+  to a daily rest when that weekly rest could end after the compensation deadline, and kept as one
+  aggregate debt, shown as `compensation_minutes` on the rest block. Driving is capped so that the rest
+  carrying it ends by the deadline (`compensation must be attached (Art 8(6b))`); a rest that ends after
+  the deadline does not pay it. When a weekly rest would end too late to carry it (for example a wait
+  until Monday after the weekly or two-week driving limit), a daily rest carrying the debt is placed
+  directly before the weekly rest, and ends before the weekly rest is due.
 - **Defaults are eager.** `extended_driving: eager` and `daily_rest_type: reduced_eager` are the
   defaults, so the `fastest` preset (which is the default policy) is the fastest.
   `extend_rest_max_minutes` bounds `extend_rest_to`, so a 06:00 target never adds 23 h.

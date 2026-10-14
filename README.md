@@ -72,11 +72,16 @@ for b in result.blocks:
 - Art 4 definitions, Art 6 driving limits (9 h, 10 h twice a week, 56 h a week, 90 h a fortnight),
   Art 7 breaks (45 min, or 15 + 30), Art 8 daily rests (11 h, 9 h up to three times between weekly rests,
   3 h + 9 h split) and weekly rests (45 h; 24 h with compensation en bloc within three weeks), the
-  weekly rest deadline of six 24 h periods, and Art 9 ferry and train interruptions.
+  weekly rest deadline of six 24 h periods, and Art 9 ferry interruptions (only of a regular daily rest
+  or a weekly rest; a train crossing can be given as a ferry).
 - Art 8(2) second sentence: a rest that is regular by length but has only 9 to 11 h inside its 24 h
   period counts as reduced (and raises `DAILY_REST_REDUCED_BY_WINDOW` when regular rests were asked for).
-- Compensation for a reduced weekly rest is attached to the next weekly rest (or an earlier daily rest
-  if the deadline is nearer) and kept as one aggregate debt.
+- Compensation for a reduced weekly rest is attached to the next weekly rest (or to a daily rest when
+  that weekly rest could end after the deadline) and kept as one aggregate debt; driving is capped so the
+  rest carrying it ends by the deadline, and a rest that ends later does not pay it.
+- Lateness at a stop is measured when its service starts, after any wait or rest before it.
+- A driver state whose 24 h period ends (or ended) too soon for a daily rest gets a plan that opens with a
+  rest and the `DAILY_REST_OVERDUE_AT_START` warning; the shortfall is the state's, not the plan's.
 - A plan is never illegal. `plan()` validates its own output with the checker and raises
   `SchedulingError` instead of returning a plan that breaks a rule. A plan may be late; it is never illegal.
 - Single driver only: `crew` must be 1.
@@ -92,20 +97,27 @@ for b in result.blocks:
 ## Policies
 
 `fastest` (default: latest-legal placement, uses the 10 h days and 9 h rests), `driver_friendly` (breaks at
-convenient stops, rests at tagged places in the evening, regular 11 h rests), `strict` (no split breaks, no
-reduced or extended anything, rests only at tagged places). Every knob is documented in `docs/policy.md`.
+convenient stops, rests at rest places in the evening, regular 11 h rests), `strict` (no split breaks, no
+reduced or extended anything, rests only at rest places). A rest place is a stop whose `tags` contain
+`"rest"` (or a ferry cabin). Every knob is documented in `docs/policy.md`.
 
 ## Warnings and errors
 
-Every warning code is listed in `docs/warnings.md`.
+Every warning code is listed in `docs/warnings.md`, including `DAILY_REST_OVERDUE_AT_START` and
+`REST_AT_STOP_NOT_ALLOWED` (a rest at a stop marked `rest_allowed: false`, when nothing else was legal).
+
+The driver state may be given in tachograph `remaining` form; `docs/contract.md` gives the exact meaning of
+each field (for example, `remaining_drive_today` is read against the 9 h cap and `daily_rest_due_in` is when
+the rest must be complete). Check them against your telematics feed.
 
 Errors:
 
-- Invalid input (malformed JSON, unknown field, `crew` other than 1, unknown preset or knob): CLI exit code 2,
-  message on stderr; the MCP tools return `{"error": ..., "disclaimer": ...}`.
+- Invalid input (malformed JSON, unknown field, `crew` other than 1, unknown preset or knob, an
+  out-of-range rule override or rest window, duplicate stop ids, a route of only zero-minute drives): CLI
+  exit code 2, message on stderr; the MCP tools return `{"error": ..., "disclaimer": ...}`.
 - No legal plan exists (`SchedulingError`): CLI exit code 1, message on stderr; the MCP tools return the same
-  `error` object. Causes: the initial driver state cannot be made legal (for example three reduced daily rests
-  are used and a regular rest no longer fits in the 24 h window); a stop or ferry whose waiting, service or
+  `error` object. Causes: the initial driver state cannot be made legal (for example a compensation debt due
+  before any rest carrying it can end); a stop or ferry whose waiting, service or
   crossing time leaves no room for a daily or weekly rest in time (a ferry crossing without a sleeper cabin
   counts as a break, so the rest is taken at the port and the crossing must fit in the 24 h after it; crossings
   up to 15 h planned in every case tried, longer ones raise); a driver who cannot legally drive again within

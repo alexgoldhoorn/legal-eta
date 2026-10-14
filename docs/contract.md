@@ -35,6 +35,26 @@ All optional, defaulting to zero or false.
 `compensation_deadline_in`. If both forms are given, fields present in both must agree. A plan from
 a `remaining` driver carries the `STATE_FROM_REMAINING` warning.
 
+All values are minutes from `start`. Telematics feeds do not all mean the same thing by these names, so
+check each one against this table. Where a feed may differ, the conservative fill is given: it can only
+make the plan earlier-resting, never illegal.
+
+| Field | Exact meaning here | Limit it is read against | Converted to (raw) | Conservative fill if your feed differs |
+|---|---|---|---|---|
+| `remaining_drive_before_break` | Driving left before the 45 min break is due. | 4.5 h (Art 7) | `driving_since_break = 270 - value` | As reported. If a 15 min first part was taken, also set `split_break_first_part_taken`. |
+| `remaining_drive_today` | Driving left today **against the 9 h cap**, also on a day that may still be extended; negative once the day is already extended beyond 9 h. The plan may still extend the day to 10 h if `extended_days_used_this_week` allows. | 9 h (Art 6(1)) | `driving_today = 540 - value` | A feed that reports against 10 h on an extension day is 60 min optimistic: subtract 60, or pass the raw form. |
+| `remaining_drive_this_week` | Driving left in the fixed week (Monday 00:00 to Sunday 24:00 in `week_timezone`). | 56 h (Art 6(2)) | `driving_this_week = 3360 - value` | A rolling-7-day figure: use the smaller of the two. |
+| `remaining_drive_fortnight` | Driving left over this week and last week together. | 90 h (Art 6(3)) | `driving_last_week = max(0, 5400 - value - driving_this_week)` | If your feed has none: 5400 minus the driving of this week and last week. |
+| `daily_rest_due_in` | When the current 24 h period ends: the next daily rest must be **complete** by then (complete-by). | 24 h period (Art 8(2)) | `last_daily_rest_end = start - (1440 - value)` | A feed that reports when the rest must **start**: add 540 (the shortest rest; adding 660 would be optimistic when a regular rest is needed). |
+| `weekly_rest_due_in` | When the next weekly rest must **start** (start-by): six 24 h periods after the end of the previous weekly rest. | Art 8(6) | `last_weekly_rest_end = start - (8640 - value)` | A feed that reports complete-by: subtract the weekly rest's length (2700, or 1440 if a reduced one is allowed). |
+| `compensation_deadline_in` | When the compensation must be **complete**: the rest carrying it must end by then (Art 8(6b)). | Art 8(6b), 8(7) | `compensation_deadline = start + value` | Omitted while `compensation_owed_minutes > 0`: there is no deadline within the plan; the debt is attached to the next weekly rest. Give it whenever you know it. |
+| other fields | The same as in the raw form. | | | |
+
+`from_remaining` also assumes that the last daily and weekly rests ended exactly when the due-in values
+imply, and that no break or rest is in progress at `start`. The `STATE_FROM_REMAINING` warning repeats the
+assumptions that applied to the request (the 9 h reading of `remaining_drive_today`, a negative value, a
+compensation debt without a deadline). Prefer the raw form when you know when the last rests ended.
+
 ## plan
 
 Request: common fields plus
@@ -42,7 +62,8 @@ Request: common fields plus
 - `crew`: `1` (default). Any other value is rejected; multi-manning is not modelled.
 - `route`: non-empty list of items, `kind` selects the type:
   - `{kind: "drive", minutes}`
-  - `{kind: "stop", id, service_minutes?, driver_works? (true), window? {earliest, latest}, rest_allowed? (true), counts_as_rest? (null), tags? []}`
+  - `{kind: "stop", id, service_minutes?, driver_works? (true), window? {earliest, latest}, rest_allowed? (true), counts_as_rest? (null), tags? []}`. A stop whose `tags` contain `"rest"` is a rest place for `policy.rest_places`; other tags are carried but not read. `rest_allowed: false` is honoured unless no other placement is legal (then `REST_AT_STOP_NOT_ALLOWED`).
+  - Stop and ferry ids must be unique, and a route of only zero-minute drives is empty: both are invalid requests.
   - `{kind: "ferry", id, minutes, sleeper_cabin? (false), boarding_minutes? (0)}`
 - `policy`: `{preset: fastest|driver_friendly|strict, overrides}`; see `policy.md`.
 
@@ -52,7 +73,7 @@ Response:
 |---|---|
 | `arrival` | Arrival time at the end of the route. |
 | `blocks` | The schedule. Each block: `kind` (`drive`, `break`, `daily_rest`, `weekly_rest`, `work`, `wait`, `ferry`), `start`, `end`, `minutes`, `at` (stop or ferry id, or null on the road), `subtype` (`regular`, `reduced`, `split_part_1`, `split_part_2`, `extended` for a drive, or null), `reason`, `article`, `counts_as_rest`, `interruptions` (Art 9: minutes of a rest interrupted by a ferry or train, non-empty means interrupted), `compensation_minutes` (compensation taken within this rest). |
-| `stops` | Per stop: `id`, `arrival`, `departure`, `lateness_minutes`, `window_met`, `rested_here`. |
+| `stops` | Per stop: `id`, `arrival`, `departure`, `lateness_minutes`, `window_met`, `rested_here`. Lateness is measured when the **service starts**, after any wait, break or rest placed before it (a rest that covers the wait for a window does not hide a missed slot): `lateness_minutes = max(0, service start - window latest)`, and `window_met` is `lateness_minutes == 0`. `arrival` is when the vehicle reaches the stop. |
 | `summary` | Minutes per kind plus `total`. |
 | `driver_state_at_end` | `{raw, remaining}`: the state after the last block, in both forms. |
 | `warnings` | `[{code, message, article}]`; see `warnings.md`. |
@@ -61,11 +82,21 @@ Response:
 | `policy` | `{preset, overrides}` as used. |
 | `disclaimer` | `Planning aid, not legal advice.` |
 
-An Art 9 interrupted rest is a block with a non-empty `interruptions` list, not a separate subtype.
+An Art 9 interrupted rest is a block with a non-empty `interruptions` list, not a separate subtype. Only a
+regular daily rest or a weekly rest may carry interruptions (Art 9(1)); the scheduler never interrupts a
+reduced daily rest or a part of a split one.
 
 ## validate
 
-Request: common fields plus `blocks`: a list of `{kind, start, minutes, subtype?, at?, counts_as_rest?, interruptions?, compensation_minutes?, in_vehicle?}`. `in_vehicle: true` marks a regular weekly rest taken in the vehicle, which Art 8(8) forbids.
+Request: common fields plus `blocks`: a list of `{kind, start, minutes, subtype?, at?, counts_as_rest?, interruptions?, compensation_minutes?, in_vehicle?}`. `in_vehicle: true` marks a rest taken in the vehicle; Art 8(8) forbids that for a regular weekly rest and for a compensation rest of more than 45 h. `counts_as_rest` defaults to false: a `wait` or `ferry` block counts as a break only when it is true.
+
+The checker judges a rest by what it counts as, not by its `subtype`: a block's subtype is checked as a claim
+(a rest shorter than its subtype claims is reported), but Art 8(4), Art 8(6) (no two consecutive reduced weekly
+rests), Art 8(8) and Art 9(1) use the length, the part inside the 24 h period and the driver state. Compensation
+is paid only by a rest that ends on or before the compensation deadline; a later one leaves the debt owed and
+it is reported at the deadline (Art 8(6b)). A deadline that passed before `start`, and a 24 h period that ends
+too soon after `start` for any daily rest to fit in it, belong to the driver state: they are restarted, not
+reported (Guidance Note 7).
 Response: `violations` (`[{article, block_index, message, excess_minutes}]`), `driver_state_at_end`, `disclaimer`.
 
 ## project
@@ -81,8 +112,9 @@ Response: `state` (`{raw, remaining}` at the horizon), `envelope` (what is still
 - **No legal plan** (`SchedulingError`): the request is well formed but no legal schedule exists. CLI:
   `cannot plan: ...` on stderr, exit code 1. Causes:
   1. `the driver state admits no legal plan: ...` (followed by the checker's violations). The initial
-     state cannot be made legal, for example three reduced daily rests are used and a regular rest can no
-     longer fit inside the 24 h window.
+     state cannot be made legal, for example 900 min of compensation are owed with a deadline 100 min
+     after `start`: no rest of 9 h plus 900 min can end by then. (A driver with three reduced daily rests
+     used and no room left for a regular one is not such a case: the plan opens with a weekly rest.)
   2. `no legal plan through stop X` / `through the ferry`: `its waiting, service or crossing time leaves no
      room for a daily or weekly rest in time`. This applies to stops as well as ferries: a long wait for a
      window, or a service time, that overruns the rest deadline. For a ferry without a sleeper cabin the
