@@ -199,3 +199,132 @@ def test_port_rest_before_a_last_long_crossing(preset: str) -> None:
         ("daily_rest", None),
         ("daily_rest", "f"),
     ]
+
+
+@pytest.mark.parametrize("preset", sorted(POLICIES))
+@pytest.mark.parametrize(
+    "route",
+    [
+        [Drive(601)],
+        [Drive(555), Ferry("f", 166, sleeper_cabin=False, boarding_minutes=90), Drive(5)],
+    ],
+)
+def test_compensation_before_a_weekly_rest_due_first(preset: str, route: list[RouteItem]) -> None:
+    """Found by a 3000-example sweep in the final fix wave.
+
+    The weekly rest must start by 2160 and, carrying 900 min, would end after the compensation
+    deadline (3600): the debt goes on a daily rest that ends before the weekly rest is due.
+    """
+    state = DriverState(
+        last_weekly_rest_end=-6480,
+        last_weekly_rest_reduced=True,
+        compensation_owed_minutes=900,
+        compensation_deadline=3600,
+    )
+    res = plan(route, state, R, POLICIES[preset], CLOCK)
+    assert_legal(res, state, R, CLOCK)
+    payer = next(b for b in res.blocks if b.compensation_minutes)
+    assert payer.kind == "daily_rest" and payer.end <= 2160
+    assert res.end_state.compensation_owed_minutes == 0
+
+
+@pytest.mark.parametrize("preset", sorted(POLICIES))
+def test_compensation_paid_before_waiting_for_the_next_week(preset: str) -> None:
+    """Found by the widened property: the fortnight limit forces a wait until Monday that would
+    end after the compensation deadline, so a daily rest carrying the debt comes first."""
+    state = DriverState(
+        driving_this_week=2821,
+        driving_last_week=2400,
+        compensation_owed_minutes=60,
+        compensation_deadline=2760,
+    )
+    res = plan([Drive(180)], state, R, POLICIES[preset], CLOCK)
+    assert_legal(res, state, R, CLOCK)
+    assert [b.kind for b in res.blocks if b.kind != "drive"][:2] == ["daily_rest", "weekly_rest"]
+    assert res.end_state.compensation_owed_minutes == 0
+
+
+@pytest.mark.parametrize("preset", sorted(POLICIES))
+def test_rest_over_a_wait_stops_at_the_compensation_deadline(preset: str) -> None:
+    """Found by a 3000-example sweep: the rest covering a 2761 min wait would end one minute
+    after the compensation deadline; it ends at the deadline and a wait block follows."""
+    state = DriverState(compensation_owed_minutes=60, compensation_deadline=2760)
+    route: list[RouteItem] = [
+        Stop("a", 0, driver_works=False, earliest=2761, latest=3001, rest_allowed=False)
+    ]
+    res = plan(route, state, R, POLICIES[preset], CLOCK)
+    assert_legal(res, state, R, CLOCK)
+    assert [(b.end, b.compensation_minutes) for b in res.blocks][0] == (2760, 60)
+    assert res.blocks[1].kind == "wait" and res.stops[0].window_met
+
+
+@pytest.mark.parametrize("preset", sorted(POLICIES))
+def test_debt_rest_before_a_forced_week_wait_keeps_the_weekly_deadline(preset: str) -> None:
+    """Found by a 3000-example sweep: the 56 h limit forces a wait until Monday, the debt goes
+    on a daily rest first, and that rest must end before the weekly rest is due (2675); an
+    11 h rest plus 900 min would not, so the 9 h one is taken whatever the policy prefers."""
+    state = DriverState(
+        driving_today=180,
+        driving_this_week=2995,
+        last_weekly_rest_end=-5965,
+        compensation_owed_minutes=900,
+        compensation_deadline=6275,
+    )
+    route: list[RouteItem] = [
+        Drive(361),
+        Stop("c", 91, driver_works=False, rest_allowed=False),
+        Drive(5),
+    ]
+    res = plan(route, state, R, POLICIES[preset], CLOCK)
+    assert_legal(res, state, R, CLOCK)
+    assert res.end_state.compensation_owed_minutes == 0
+
+
+@pytest.mark.parametrize("preset", sorted(POLICIES))
+def test_debt_paid_before_the_two_week_limit_forces_a_long_weekly_rest(preset: str) -> None:
+    """Found by a 3000-example sweep: the 90 h limit runs out before the weekly rest is due
+    (2466), so that rest lasts until Monday and cannot carry the debt; the debt rides on a
+    daily rest that ends before the weekly rest must start."""
+    state = DriverState(
+        last_daily_rest_end=-172,
+        driving_this_week=2678,
+        driving_last_week=2400,
+        last_weekly_rest_end=-6174,
+        compensation_owed_minutes=900,
+        compensation_deadline=6066,
+    )
+    route: list[RouteItem] = [
+        Drive(5),
+        Ferry("f", 182, sleeper_cabin=True, boarding_minutes=60),
+        Drive(1938),
+    ]
+    res = plan(route, state, R, POLICIES[preset], CLOCK)
+    assert_legal(res, state, R, CLOCK)
+    payer = next(b for b in res.blocks if b.compensation_minutes)
+    assert payer.kind == "daily_rest" and payer.end <= 2466
+
+
+@pytest.mark.parametrize("preset", sorted(POLICIES))
+def test_debt_paid_before_a_weekly_rest_at_the_port(preset: str) -> None:
+    """Found by a 3000-example sweep: no reduced daily rest is left and the 781 min boarding
+    plus crossing (no cabin) leaves no room for an 11 h rest after a daily rest; a weekly rest
+    at the port is the way out, and the debt it cannot carry in time goes on a daily rest
+    taken first."""
+    state = DriverState(
+        reduced_daily_rests_used=3,
+        last_weekly_rest_reduced=True,
+        compensation_owed_minutes=900,
+        compensation_deadline=3600,
+    )
+    route: list[RouteItem] = [
+        Drive(5),
+        Stop("s", 0, driver_works=False, rest_allowed=False),
+        Ferry("f", 691, sleeper_cabin=False, boarding_minutes=90),
+        Drive(5),
+    ]
+    res = plan(route, state, R, POLICIES[preset], CLOCK)
+    assert_legal(res, state, R, CLOCK)
+    assert [(b.kind, b.compensation_minutes) for b in res.blocks[1:3]] == [
+        ("daily_rest", 900),
+        ("weekly_rest", 0),
+    ]

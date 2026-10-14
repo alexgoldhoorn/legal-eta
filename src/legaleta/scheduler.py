@@ -559,16 +559,45 @@ def _caps(ctx: _Ctx, cur: _Cursor, env: Envelope) -> list[tuple[int, str]]:
 _UNBOUNDED = 10**9  # a cap that never binds
 
 
-def _compensation_cap(ctx: _Ctx, cur: _Cursor, env: Envelope) -> int:
-    """Art 8(6b): drive no longer than lets a rest carrying the debt end by its deadline.
+def _rides_on_daily_rest(ctx: _Ctx, state: DriverState, env: Envelope, now: int) -> bool:
+    """The debt goes on a daily rest: the next weekly rest, started at its deadline, could end
+    after the compensation deadline (Art 8(6b)).
 
-    Once the deadline has passed (only possible when the driver state starts too close to it)
-    there is nothing left to protect, and the cap no longer binds.
+    When the weekly or two-week driving limit may run out before that weekly rest is due, the
+    weekly rest may have to last until the next week starts, and that longer rest is assumed.
+    """
+    due = env.compensation_due_in
+    if due is None:
+        return False
+    weekly_due = env.weekly_rest_due_in
+    weekly_len = ctx.rules.weekly_rest_regular
+    if min(env.drive_this_week, env.drive_fortnight) < weekly_due:
+        monday = ctx.clock.next_week_start(now + max(0, weekly_due))
+        weekly_len = max(weekly_len, monday - (now + weekly_due))
+    return due < weekly_due + weekly_len + state.compensation_owed_minutes
+
+
+def _compensation_end_by(ctx: _Ctx, state: DriverState, env: Envelope, now: int) -> int | None:
+    """Minutes until the rest carrying the debt must end, or None when nothing binds.
+
+    A daily rest carrying it must also end before the weekly rest has to start. Once the
+    deadline has passed (only possible when the driver state starts too close to it) there is
+    nothing left to protect, and None is returned.
     """
     due = env.compensation_due_in
     if due is None or due <= 0:
+        return None
+    if _rides_on_daily_rest(ctx, state, env, now):
+        return min(due, env.weekly_rest_due_in)
+    return due
+
+
+def _compensation_cap(ctx: _Ctx, cur: _Cursor, env: Envelope) -> int:
+    """Art 8(6b): drive no longer than lets a rest carrying the debt end in time."""
+    end_by = _compensation_end_by(ctx, cur.state, env, cur.t)
+    if end_by is None:
         return _UNBOUNDED
-    return due - (_shortest_daily_rest(ctx, cur, env) + cur.state.compensation_owed_minutes)
+    return end_by - (_shortest_daily_rest(ctx, cur, env) + cur.state.compensation_owed_minutes)
 
 
 def _drive_limit(ctx: _Ctx, cur: _Cursor, env: Envelope) -> int:
@@ -644,13 +673,7 @@ def _compensation_now(ctx: _Ctx, cur: _Cursor, kind: str, sub: str, start_t: int
     env = envelope(s, ctx.rules, start_t)
     if kind == "weekly_rest":
         return s.compensation_owed_minutes
-    # pay at this daily rest when the next weekly rest, started at its deadline, could end
-    # after the compensation deadline (Art 8(6b))
-    if env.compensation_due_in is not None and env.compensation_due_in < (
-        env.weekly_rest_due_in + ctx.rules.weekly_rest_regular + s.compensation_owed_minutes
-    ):
-        return s.compensation_owed_minutes
-    return 0
+    return s.compensation_owed_minutes if _rides_on_daily_rest(ctx, s, env, start_t) else 0
 
 
 def _rest_block(
@@ -859,40 +882,59 @@ def _validates(ctx: _Ctx, cur: _Cursor, choice: Choice) -> bool:
     return not validate(sim.blocks[n:], cur.state, ctx.rules, ctx.clock, start=cur.t)
 
 
-def _wait_next_week_choice(ctx: _Ctx, cur: _Cursor) -> Choice:
+def _debt_first(
+    ctx: _Ctx, cur: _Cursor, weekly_minutes: int, at: str | None = None, place: str = ""
+) -> tuple[Block, ...]:
+    """A daily rest carrying the compensation debt, to take right before a weekly rest of
+    weekly_minutes that would itself end after the compensation deadline (Art 8(6b)); or ()."""
     r, s = ctx.rules, cur.state
-    nxt = ctx.clock.next_week_start(cur.t)
-    place = " at the roadside until the next week starts (weekly driving limits reached)"
-    first: tuple[Block, ...] = ()
     owed, deadline = s.compensation_owed_minutes, s.compensation_deadline
-    if (
-        owed
-        and deadline is not None
-        and cur.t + max(nxt - cur.t, r.weekly_rest_regular) + owed > (deadline)
-    ):
-        # Art 8(6b): the long wait would end after the compensation deadline, so a daily rest
-        # carrying the debt comes first
-        env = envelope(s, r, cur.t)
-        shortest = _shortest_daily_rest(ctx, cur, env)
-        sub = (
-            "split_part_2"
-            if "split_part_2" in env.allowed_daily_rests
-            else ("reduced" if shortest == r.daily_rest_reduced else "regular")
-        )
-        first = (_rest_block(ctx, cur, "daily_rest", sub, None, cur.t, compensation=owed),)
+    if not owed or deadline is None or cur.t + weekly_minutes + owed <= deadline:
+        return ()
+    env = envelope(s, r, cur.t)
+    shortest = _shortest_daily_rest(ctx, cur, env)
+    if shortest + owed > env.weekly_rest_due_in:
+        # legality outranks the policy: the shortest rest the rules allow, so that the weekly
+        # rest can still start in time
+        shortest = _shortest_daily_rest(ctx, cur, env, honour_policy=False)
+    sub = (
+        "split_part_2"
+        if "split_part_2" in env.allowed_daily_rests
+        else ("reduced" if shortest == r.daily_rest_reduced else "regular")
+    )
+    return (_rest_block(ctx, cur, "daily_rest", sub, at, cur.t, place=place, compensation=owed),)
+
+
+def _road_weekly_choice(
+    ctx: _Ctx, cur: _Cursor, name: str, sub: str, weekly_minutes: int, place: str = ""
+) -> Choice:
+    first = _debt_first(ctx, cur, weekly_minutes)
     t = cur.t + sum(b.minutes for b in first)
     block = _rest_block(
         ctx,
         cur,
         "weekly_rest",
-        "regular",
+        sub,
         None,
         t,
-        minutes=max(nxt - t, r.weekly_rest_regular),
+        minutes=weekly_minutes,
         place=place,
         compensation=0 if first else None,
     )
-    return Choice("wait_next_week", (*first, block), "road")
+    return Choice(name, (*first, block), "road", needed_only=_needed_only(ctx, "weekly_rest", sub))
+
+
+def _wait_next_week_choice(ctx: _Ctx, cur: _Cursor) -> Choice:
+    nxt = ctx.clock.next_week_start(cur.t)
+    minutes = max(nxt - cur.t, ctx.rules.weekly_rest_regular)
+    place = " at the roadside until the next week starts (weekly driving limits reached)"
+    choice = _road_weekly_choice(ctx, cur, "wait_next_week", "regular", minutes, place)
+    if len(choice.blocks) == 1:
+        return choice
+    # the daily rest paying the debt comes first: the wait still ends when the week starts
+    first = choice.blocks[0]
+    rest = replace(choice.blocks[1], minutes=max(nxt - first.end, ctx.rules.weekly_rest_regular))
+    return replace(choice, blocks=(first, rest), needed_only=False)
 
 
 # ---------------------------------------------------------------- decision points
@@ -980,11 +1022,8 @@ def _road_choices(ctx: _Ctx, cur: _Cursor) -> list[Choice]:
 
     def weekly_choices() -> list[Choice]:
         return [
-            Choice(
-                f"weekly_rest_{sub}",
-                (_rest_block(ctx, cur, "weekly_rest", sub, None, cur.t),),
-                "road",
-                needed_only=_needed_only(ctx, "weekly_rest", sub),
+            _road_weekly_choice(
+                ctx, cur, f"weekly_rest_{sub}", sub, _rest_minutes(ctx, "weekly_rest", sub)
             )
             for sub in env.allowed_weekly_rests
             if _policy_allows(ctx, env, "weekly_rest", sub)
@@ -1228,6 +1267,21 @@ def _stop_choices(ctx: _Ctx, cur: _Cursor, stop: Stop) -> list[Choice]:
     )
 
 
+def _cover_wait(cur: _Cursor, rest: Block, wait: Block) -> tuple[Block, ...]:
+    """A rest at a stop stretched to cover the wait for its window.
+
+    A rest carrying compensation is stretched no further than the compensation deadline
+    (Art 8(6b)); the rest of the wait follows it as a wait block.
+    """
+    if rest.minutes >= wait.minutes:
+        return (rest,)
+    deadline = cur.state.compensation_deadline
+    if rest.compensation_minutes and deadline is not None and cur.t + wait.minutes > deadline:
+        stretched = max(rest.minutes, deadline - cur.t)
+        return (replace(rest, minutes=stretched), replace(wait, minutes=wait.minutes - stretched))
+    return (replace(rest, minutes=wait.minutes),)
+
+
 def _rest_at_stop(
     ctx: _Ctx,
     cur: _Cursor,
@@ -1248,10 +1302,13 @@ def _rest_at_stop(
             cur.t,
             place=f" at {stop.id}, covering the wait for the window",
         )
-        if rest.minutes < wait.minutes:
-            rest = replace(rest, minutes=wait.minutes)
+        covered = _cover_wait(cur, rest, wait)
         return Choice(
-            f"{kind}_{sub}_here", (rest, *service), "stop", needed_only=needed, service_index=1
+            f"{kind}_{sub}_here",
+            (*covered, *service),
+            "stop",
+            needed_only=needed,
+            service_index=len(covered),
         )
     start_t = cur.t + sum(b.minutes for b in service)
     rest = _rest_block(ctx, cur, kind, sub, stop.id, start_t)
@@ -1374,11 +1431,11 @@ def _legal(ctx: _Ctx, cur: _Cursor, choice: Choice, honour_policy: bool = True) 
         return True  # the plan ends here; nothing after it is checked
     env = envelope(sim.state, ctx.rules, sim.t)
     min_rest = _shortest_daily_rest(ctx, sim, env, honour_policy)
-    due = env.compensation_due_in
-    # Art 8(6b): a rest carrying the debt can still end by its deadline (once the deadline
-    # has passed, validate() above has reported it, or it passed before this choice)
+    end_by = _compensation_end_by(ctx, sim.state, env, sim.t)
+    # Art 8(6b): a rest carrying the debt can still end in time (once the deadline has
+    # passed, validate() above has reported it, or it passed before this choice)
     compensation_ok = (
-        due is None or due <= 0 or due >= min_rest + sim.state.compensation_owed_minutes
+        end_by is None or end_by <= 0 or end_by >= min_rest + sim.state.compensation_owed_minutes
     )
     return env.daily_window_ends_in >= min_rest and env.weekly_rest_due_in >= 0 and compensation_ok
 
@@ -1440,25 +1497,38 @@ def _rest_first_choices(
             place = (
                 f" at {at} before the service" if at is not None else " at the port before boarding"
             ) + " (no later start keeps the next rest legal)"
-            rest = _rest_block(ctx, cur, kind, sub, at, cur.t, place=place)
-            if rest.minutes < wait_minutes:
-                rest = replace(rest, minutes=wait_minutes)
+            # a weekly rest that would end after the compensation deadline: the debt goes on a
+            # daily rest taken first
+            first = (
+                _debt_first(ctx, cur, _rest_minutes(ctx, kind, sub), at, place)
+                if kind == "weekly_rest"
+                else ()
+            )
+            t0 = cur.t + sum(b.minutes for b in first)
+            rest = _rest_block(
+                ctx, cur, kind, sub, at, t0, place=place, compensation=0 if first else None
+            )
+            left = wait_minutes - (t0 - cur.t)
+            covered = (
+                *first,
+                *(_cover_wait(cur, rest, replace(wait[0], minutes=left)) if left > 0 else (rest,)),
+            )
             choice = Choice(
                 f"{kind}_{sub}_before",
-                (rest, *after),
+                (*covered, *after),
                 where,
                 needed_only=_needed_only(ctx, kind, sub),
-                service_index=1,
+                service_index=len(covered),
             )
             if _legal(ctx, cur, choice, honour_policy):
                 fallback.append(choice)
             elif then is not None:
                 sim = cur.copy()
-                _commit(ctx, sim, Choice(choice.name, (rest,), where))
+                _commit(ctx, sim, Choice(choice.name, covered, where))
                 for nxt in then(sim):
                     both = Choice(
                         f"{choice.name}+{nxt.name}",
-                        (rest, *nxt.blocks),
+                        (*covered, *nxt.blocks),
                         where,
                         needed_only=choice.needed_only or nxt.needed_only,
                     )
