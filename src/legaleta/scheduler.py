@@ -9,7 +9,7 @@ from dataclasses import dataclass, field, replace
 
 from legaleta.checker import validate
 from legaleta.clock import Clock
-from legaleta.policy import PREFERENCE_WEIGHTS, Policy
+from legaleta.policy import PREFERENCE_WEIGHTS, REST_PLACE_TAG, Policy
 from legaleta.rules import RuleSet
 from legaleta.state import DriverState, Envelope, apply, envelope
 from legaleta.timeline import REST_KINDS, Block, Drive, Ferry, RouteItem, Stop, merge_drives
@@ -118,6 +118,10 @@ class Choice:
     needed_only: bool = False  # offered only when the plain option is late (policy "when_needed")
     sets_extend: bool = False
     sets_reduced: bool = False
+    # at a stop: the service starts when block service_index starts, plus service_delay
+    # minutes (a break that covers the wait and idle service holds it inside)
+    service_index: int = 0
+    service_delay: int = 0
 
 
 Chooser = Callable[[_Ctx, _Cursor, list[Choice]], Choice]
@@ -474,9 +478,20 @@ def _apply_choice(ctx: _Ctx, cur: _Cursor, choice: Choice) -> None:
         stop = ctx.route[cur.idx]
         assert isinstance(stop, Stop)
         arrival = cur.t
-        _commit(ctx, cur, choice)
-        lateness = max(0, arrival - stop.latest) if stop.latest is not None else 0
+        starts = _commit(ctx, cur, choice)
+        # lateness is judged when the service starts, after any wait or rest before it
+        service_start = starts[choice.service_index] + choice.service_delay
+        lateness = max(0, service_start - stop.latest) if stop.latest is not None else 0
         rested = any(b.kind in REST_KINDS and b.at == stop.id for b in choice.blocks)
+        if rested and not stop.rest_allowed:
+            _warn(
+                cur,
+                "REST_AT_STOP_NOT_ALLOWED",
+                f"A rest was planned at stop {stop.id}, which the route marks rest_allowed: "
+                "false: no other placement kept the plan legal, and legality outranks the "
+                "stop's setting.",
+                "",
+            )
         cur.stops.append(StopResult(stop.id, arrival, cur.t, lateness, lateness == 0, rested))
         cur.lateness += lateness
         cur.stops_done += 1
@@ -488,14 +503,19 @@ def _apply_choice(ctx: _Ctx, cur: _Cursor, choice: Choice) -> None:
         _commit(ctx, cur, choice)
 
 
-def _commit(ctx: _Ctx, cur: _Cursor, choice: Choice) -> None:
+def _commit(ctx: _Ctx, cur: _Cursor, choice: Choice) -> list[int]:
+    """Emit the choice's blocks; return the time each one started, then the end time."""
+    starts: list[int] = []
     for b in choice.blocks:
+        starts.append(cur.t)
         _emit(ctx, cur, b)
+    starts.append(cur.t)
     if choice.sets_extend:
         cur.extend_today = True
     if choice.sets_reduced:
         cur.reduced_today = True
     cur.penalty += choice.penalty
+    return starts
 
 
 # ---------------------------------------------------------------- driving
@@ -736,31 +756,33 @@ def _apply_preferences(
 
     def pass_(knob: str, cs: list[Choice]) -> list[Choice]:
         kept: list[Choice] = []
+        # every choice with the cost of what it breaks: used when the knob must be dropped,
+        # so that the lookahead still prefers honouring a hard knob where it can
+        restored: list[Choice] = []
         for c in cs:
             penalty, drop = 0.0, False
             for b, t0 in _rest_blocks_with_start(c, cur):
                 if (
                     knob == "rest_places"
-                    and b.at is None
+                    and not _tagged_place(ctx, b.at)
                     and b.kind in REST_KINDS
                     and c.name != "wait_next_week"
+                    and p.rest_places != "anywhere"
                 ):
-                    if p.rest_places == "tagged_only":
-                        drop = True
-                    elif p.rest_places == "prefer_tagged":
-                        penalty += PREFERENCE_WEIGHTS["rest_places"]
+                    drop = drop or p.rest_places == "tagged_only"
+                    penalty += PREFERENCE_WEIGHTS["rest_places"]
                 if (
                     knob == "rest_start_window"
                     and p.rest_start_window is not None
                     and b.kind == "daily_rest"
                     and not p.rest_start_window.contains(ctx.clock.minute_of_day(t0))
                 ):
-                    if p.rest_start_window.hard:
-                        drop = True
-                    else:
-                        penalty += p.rest_start_window.weight * 60.0
+                    drop = drop or p.rest_start_window.hard
+                    penalty += p.rest_start_window.weight * 60.0
+            priced = replace(c, penalty=c.penalty + penalty) if penalty else c
+            restored.append(priced)
             if not drop:
-                kept.append(replace(c, penalty=c.penalty + penalty) if penalty else c)
+                kept.append(priced)
         # every choice dropped, or only weekly rests left where daily rests were offered
         only_weekly_left = (
             any(is_daily_rest(c) for c in cs)
@@ -775,10 +797,21 @@ def _apply_preferences(
                 "latest-legal placement used",
                 "",
             )
-            return cs
+            return restored
         return kept
 
     return pass_("rest_start_window", pass_("rest_places", choices))
+
+
+def _tagged_place(ctx: _Ctx, at: str | None) -> bool:
+    """policy.rest_places: a stop tagged REST_PLACE_TAG, or a ferry (a rest on board is in
+    its cabin). The roadside and untagged stops are not tagged places."""
+    for it in ctx.route:
+        if isinstance(it, Stop) and it.id == at:
+            return REST_PLACE_TAG in it.tags
+        if isinstance(it, Ferry) and it.id == at:
+            return True
+    return False
 
 
 def _policy_allows(ctx: _Ctx, env: Envelope, kind: str, sub: str) -> bool:
@@ -1101,13 +1134,13 @@ def _break_at_stop(
         reason += ", covering " + " and ".join(what)
     brk = _break_block(ctx, max(minutes, covered), stop.id, reason)
     if waited:
-        return Choice(name, (brk, *other), "stop")  # the wait comes before any service
-    blocks = (
-        (brk, *other)
-        if p.break_at_working_stop == "before" or not stop.driver_works
-        else (*other, brk)
-    )
-    return Choice(name, blocks, "stop")
+        # the wait comes before any service; idle service is held inside the break
+        if other:
+            return Choice(name, (brk, *other), "stop", service_index=1)
+        return Choice(name, (brk,), "stop", service_delay=waited)
+    if p.break_at_working_stop == "before" or not stop.driver_works:
+        return Choice(name, (brk, *other), "stop", service_index=1 if other else 0)
+    return Choice(name, (*other, brk), "stop")
 
 
 def _stop_choices(ctx: _Ctx, cur: _Cursor, stop: Stop) -> list[Choice]:
@@ -1127,7 +1160,7 @@ def _stop_choices(ctx: _Ctx, cur: _Cursor, stop: Stop) -> list[Choice]:
     )
     service = _service_blocks(ctx, stop)
     base: tuple[Block, ...] = (wait, *service) if wait_minutes else service
-    out = [Choice("continue", base, "stop")]
+    out = [Choice("continue", base, "stop", service_index=1 if wait_minutes else 0)]
     next_drive = _next_drive_minutes(ctx, cur.idx)
     if next_drive == 0:
         return _legal_or_rest_first(
@@ -1217,7 +1250,9 @@ def _rest_at_stop(
         )
         if rest.minutes < wait.minutes:
             rest = replace(rest, minutes=wait.minutes)
-        return Choice(f"{kind}_{sub}_here", (rest, *service), "stop", needed_only=needed)
+        return Choice(
+            f"{kind}_{sub}_here", (rest, *service), "stop", needed_only=needed, service_index=1
+        )
     start_t = cur.t + sum(b.minutes for b in service)
     rest = _rest_block(ctx, cur, kind, sub, stop.id, start_t)
     return Choice(f"{kind}_{sub}_here", (*service, rest), "stop", needed_only=needed)
@@ -1413,6 +1448,7 @@ def _rest_first_choices(
                 (rest, *after),
                 where,
                 needed_only=_needed_only(ctx, kind, sub),
+                service_index=1,
             )
             if _legal(ctx, cur, choice, honour_policy):
                 fallback.append(choice)

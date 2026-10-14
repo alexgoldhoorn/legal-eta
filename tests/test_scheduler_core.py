@@ -417,3 +417,26 @@ def test_compensation_deadline_sweep(clock: Clock, deadline: int) -> None:
         res = plan([Drive(600), Stop("X", 60), Drive(900)], s, R, policy, clock)
         assert res.end_state.compensation_owed_minutes == 0
         assert_legal(res, s, R, clock)
+
+
+def test_lateness_is_measured_at_service_start(clock: Clock) -> None:
+    # I6 probe: window 200-400, arrival at 120, and the rest must start now (the period ends at
+    # 660): the rest covers the wait and the service starts at 660, 260 min after the window
+    route = [Drive(120), Stop("X", 60, earliest=200, latest=400), Drive(100)]
+    s = DriverState(last_daily_rest_end=-780)
+    res = plan(route, s, R, Policy(), clock)
+    x = res.stops[0]
+    assert (x.arrival, x.departure, x.rested_here) == (120, 720, True)
+    assert (x.lateness_minutes, x.window_met) == (260, False)
+    assert_legal(res, s, R, clock)
+
+
+def test_lookahead_serves_the_window_before_resting(clock: Clock) -> None:
+    # with room to serve first (the rest may start up to 300), resting at X over the wait no
+    # longer looks punctual: the plan serves X in its window, then rests
+    route = [Drive(120), Stop("X", 60, earliest=200, latest=400), Drive(300)]
+    s = DriverState(last_daily_rest_end=-600)
+    res = plan(route, s, R, Policy(), clock)
+    x = res.stops[0]
+    assert (x.lateness_minutes, x.window_met, x.rested_here, x.departure) == (0, True, False, 260)
+    assert_legal(res, s, R, clock)

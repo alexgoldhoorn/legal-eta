@@ -8,6 +8,9 @@ from typing import Any
 
 from legaleta.clock import parse_hhmm
 
+# policy.rest_places: a stop is a tagged rest place when its `tags` contain this tag
+REST_PLACE_TAG = "rest"
+
 PREFERENCE_WEIGHTS: dict[str, float] = {
     "break_timing": 30.0,
     "split_breaks": 15.0,

@@ -103,7 +103,7 @@ def test_break_before_or_after_work(clock: Clock) -> None:
 def test_prefer_tagged_rests_at_stop(clock: Clock) -> None:
     route = [
         Drive(480),
-        Stop("C", service_minutes=20, driver_works=True, rest_allowed=True),
+        Stop("C", service_minutes=20, driver_works=True, rest_allowed=True, tags=("rest",)),
         Drive(200),
     ]
     anywhere = plan(
@@ -334,3 +334,58 @@ def test_earliest_convenient_with_split_prefer_takes_15_at_a(clock: Clock) -> No
     first = [b for b in res.blocks if b.kind == "break"][0]
     assert (first.at, first.minutes) == ("A", 15)
     assert_legal(res, DriverState(), R, clock)
+
+
+# --- rest_places reads Stop.tags (I7)
+def _tag_route(tag_t: tuple[str, ...], tag_u: tuple[str, ...]) -> list[Drive | Stop]:
+    # one 11 h rest is needed; resting at T, at U or on the road after U arrive alike
+    return [
+        Drive(300),
+        Stop("T", 20, tags=tag_t),
+        Drive(200),
+        Stop("U", 20, tags=tag_u),
+        Drive(300),
+    ]
+
+
+@pytest.mark.parametrize("knob", ["prefer_tagged", "tagged_only"])
+@pytest.mark.parametrize(
+    ("tag_t", "tag_u", "where"),
+    [
+        (("rest",), (), "T"),
+        ((), ("rest",), "U"),
+        ((), (), None),
+        (("depot",), (), None),  # only the "rest" tag makes a rest place
+    ],
+)
+def test_rest_places_follow_the_rest_tag(
+    clock: Clock,
+    knob: str,
+    tag_t: tuple[str, ...],
+    tag_u: tuple[str, ...],
+    where: str | None,
+) -> None:
+    pol = Policy(rest_places=knob, daily_rest_type="regular", extended_driving="never")
+    res = plan(_tag_route(tag_t, tag_u), DriverState(), R, pol, clock)
+    assert [b.at for b in res.blocks if b.kind == "daily_rest"] == [where]
+    # with no tagged stop, tagged_only cannot be honoured and says so
+    unmet = "PREFERENCE_UNMET:rest_places" in codes(res)
+    assert unmet == (knob == "tagged_only" and where is None)
+    assert_legal(res, DriverState(), R, clock)
+
+
+def test_rest_at_stop_not_allowed_warns(clock: Clock) -> None:
+    # the 24 h period leaves no room to serve X first: the only legal rest is at X before its
+    # service, although the route says no rest may be taken there
+    route = [
+        Drive(120),
+        Stop("X", 60, earliest=200, latest=400, rest_allowed=False),
+        Drive(100),
+    ]
+    s = DriverState(last_daily_rest_end=-780)
+    res = plan(route, s, R, Policy(), clock)
+    assert res.stops[0].rested_here
+    assert "REST_AT_STOP_NOT_ALLOWED" in codes(res)
+    assert_legal(res, s, R, clock)
+    allowed = [Drive(120), Stop("X", 60, earliest=200, latest=400), Drive(100)]
+    assert "REST_AT_STOP_NOT_ALLOWED" not in codes(plan(allowed, s, R, Policy(), clock))
