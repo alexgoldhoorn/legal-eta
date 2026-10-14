@@ -145,6 +145,55 @@ def plain_chooser(ctx: _Ctx, cur: _Cursor, choices: list[Choice]) -> Choice:
     return min(primary, key=lambda c: _RANK.get(_base_name(c.name), 99))
 
 
+@dataclass(frozen=True)
+class _Scored:
+    choice: Choice
+    score: float
+    lateness: int
+    slack: int
+    order: int
+
+
+def _score(ctx: _Ctx, cur: _Cursor, choice: Choice, order: int) -> _Scored:
+    p = ctx.policy
+    sim = cur.copy()
+    _apply_choice(ctx, sim, choice)
+    e = envelope(sim.state, ctx.rules, sim.t)
+    # the nearest binding limit; a sum would let a daily rest (which resets two of the three)
+    # win every tie with a break on the road
+    slack = min(e.drive_before_break, e.drive_today, e.daily_window_ends_in)
+    sim = _run(ctx, sim, plain_chooser, stop_budget=cur.stops_done + p.lookahead_stops)
+    added_lateness = sim.lateness - cur.lateness
+    score = (
+        p.lateness_weight * added_lateness
+        + p.arrival_weight * (sim.t - cur.t)
+        + (sim.penalty - cur.penalty)
+    )
+    return _Scored(choice, score, added_lateness, slack, order)
+
+
+def _best(ctx: _Ctx, cur: _Cursor, choices: list[Choice]) -> _Scored:
+    scored = [_score(ctx, cur, c, i) for i, c in enumerate(choices)]
+    return min(scored, key=lambda s: (s.score, -s.slack, s.order))
+
+
+def lookahead_chooser(ctx: _Ctx, cur: _Cursor, choices: list[Choice]) -> Choice:
+    """Score each choice by simulating the next policy.lookahead_stops stops (spec 5.2).
+
+    Stage 1 scores the choices that are not needed_only; stage 2 (all choices) runs only
+    when stage 1's best is late in the horizon, and wins only with a strictly lower score.
+    """
+    if len(choices) == 1:
+        return choices[0]
+    stage1 = [c for c in choices if not c.needed_only] or choices
+    best = _best(ctx, cur, stage1)
+    if best.lateness > 0 and len(stage1) < len(choices):
+        best2 = _best(ctx, cur, choices)
+        if best2.score < best.score:
+            best = best2
+    return best.choice
+
+
 # ---------------------------------------------------------------- public entry point
 
 
@@ -153,7 +202,7 @@ def plan(
 ) -> PlanResult:
     items = merge_drives(list(route))
     ctx = _Ctx(items, rules, policy, clock)
-    cur = _run(ctx, _Cursor(t=0, state=state), plain_chooser)
+    cur = _run(ctx, _Cursor(t=0, state=state), lookahead_chooser)
     violations = validate(cur.blocks, state, rules, clock)
     if violations:
         # late, never illegal: a plan that does not validate is never returned
