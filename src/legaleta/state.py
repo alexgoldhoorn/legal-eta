@@ -112,13 +112,17 @@ def _apply_drive(state: DriverState, block: Block, rules: RuleSet, clock: Clock)
             driving_this_week=state.driving_this_week + minutes,
             extended_days_used_this_week=state.extended_days_used_this_week + extra,
         )
-        if seg_end == boundary and seg_end < end:
+        if seg_end == boundary:
             state = _roll_weeks(state, t, boundary, clock)
         t = seg_end
     return state
 
 
 def _apply_break(state: DriverState, minutes: int, rules: RuleSet) -> DriverState:
+    """Each block is judged alone; adjacent break-type blocks are never aggregated.
+
+    Deliberate and conservative: it never calls an illegal plan legal.
+    """
     if minutes >= rules.break_full or (
         state.split_break_first_part_taken and minutes >= rules.break_split_second
     ):

@@ -132,3 +132,52 @@ def test_week_rollover_on_non_drive_block(clock: Clock) -> None:
     s = DriverState(driving_this_week=3000)
     s = apply(s, Block("work", t_sun_2200, 240), R, clock)
     assert (s.driving_last_week, s.driving_this_week) == (3000, 0)
+
+
+def test_drive_ending_on_monday_rolls_before_next_drive(clock: Clock) -> None:
+    b = clock.next_week_start(0)
+    s = DriverState(driving_this_week=100)
+    s = replay(s, [Block("drive", b - 60, 60), Block("drive", b, 60)], R, clock)
+    assert (s.driving_last_week, s.driving_this_week) == (160, 60)
+
+
+def test_drive_ending_on_monday_rolls_before_work(clock: Clock) -> None:
+    b = clock.next_week_start(0)
+    s = DriverState(driving_this_week=100)
+    s = replay(s, [Block("drive", b - 60, 60), Block("work", b, 60)], R, clock)
+    assert (s.driving_last_week, s.driving_this_week) == (160, 0)
+
+
+def test_no_double_roll_after_non_drive_ends_on_boundary(clock: Clock) -> None:
+    b = clock.next_week_start(0)
+    s = DriverState(driving_this_week=100)
+    s = replay(s, [Block("work", b - 60, 60), Block("drive", b, 60)], R, clock)
+    assert (s.driving_last_week, s.driving_this_week) == (100, 60)
+
+
+def test_drive_limit_with_and_without_extension() -> None:
+    s = DriverState(driving_since_break=100, driving_today=500)
+    e = envelope(s, R, 0)
+    assert e.drive_limit(True) == 100 and e.drive_limit(False) == 40
+    s2 = DriverState(extended_days_used_this_week=2, driving_today=0)
+    assert envelope(s2, R, 0).drive_limit(True) == 270
+    s3 = DriverState(driving_today=600)
+    assert envelope(s3, R, 0).drive_limit(True) == 0
+
+
+def test_envelope_rest_options_and_compensation() -> None:
+    e = envelope(DriverState(reduced_daily_rests_used=3), R, 0)
+    assert e.allowed_daily_rests == ("regular", "split_part_1")
+    e = envelope(DriverState(split_daily_rest_first_part_taken=True), R, 0)
+    assert e.allowed_daily_rests == ("regular", "reduced", "split_part_2")
+    e = envelope(DriverState(last_weekly_rest_reduced=True), R, 0)
+    assert e.allowed_weekly_rests == ("regular",)
+    s = DriverState(compensation_owed_minutes=600, compensation_deadline=5000)
+    assert envelope(s, R, 1000).compensation_due_in == 4000
+    s = DriverState(compensation_owed_minutes=600, compensation_deadline=None)
+    assert envelope(s, R, 1000).compensation_due_in is None
+
+
+def test_envelope_fortnight_uses_last_week() -> None:
+    e = envelope(DriverState(driving_last_week=2000, driving_this_week=1000), R, 0)
+    assert e.drive_fortnight == 5400 - 3000
