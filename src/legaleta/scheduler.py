@@ -375,6 +375,10 @@ def _emit(ctx: _Ctx, cur: _Cursor, block: Block) -> None:
             and block.start + stretched > deadline >= block.end
         ):
             stretched = block.minutes  # never stretch a compensating rest past its deadline
+        if block.kind == "daily_rest":
+            weekly_by = cur.t + envelope(cur.state, ctx.rules, cur.t).weekly_rest_due_in
+            if block.start + stretched > weekly_by >= block.end:
+                stretched = block.minutes  # nor a daily rest past the weekly start-by (Art 8(6))
         if stretched > block.minutes:
             extra = stretched - block.minutes
             cur.extension_minutes += extra
@@ -933,7 +937,8 @@ def _wait_next_week_choice(ctx: _Ctx, cur: _Cursor) -> Choice:
         return choice
     # the daily rest paying the debt comes first: the wait still ends when the week starts
     first = choice.blocks[0]
-    rest = replace(choice.blocks[1], minutes=max(nxt - first.end, ctx.rules.weekly_rest_regular))
+    weekly_start = cur.t + first.minutes
+    rest = replace(choice.blocks[1], minutes=max(nxt - weekly_start, ctx.rules.weekly_rest_regular))
     return replace(choice, blocks=(first, rest), needed_only=False)
 
 
@@ -1433,10 +1438,8 @@ def _legal(ctx: _Ctx, cur: _Cursor, choice: Choice, honour_policy: bool = True) 
     min_rest = _shortest_daily_rest(ctx, sim, env, honour_policy)
     end_by = _compensation_end_by(ctx, sim.state, env, sim.t)
     # Art 8(6b): a rest carrying the debt can still end in time (once the deadline has
-    # passed, validate() above has reported it, or it passed before this choice)
-    compensation_ok = (
-        end_by is None or end_by <= 0 or end_by >= min_rest + sim.state.compensation_owed_minutes
-    )
+    # passed, end_by is None: validate() above has reported it, or it passed before the plan)
+    compensation_ok = end_by is None or end_by >= min_rest + sim.state.compensation_owed_minutes
     return env.daily_window_ends_in >= min_rest and env.weekly_rest_due_in >= 0 and compensation_ok
 
 

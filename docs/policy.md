@@ -54,7 +54,8 @@ Two things configure a plan:
   until Monday after the weekly or two-week driving limit), a daily rest carrying the debt is placed
   directly before the weekly rest, and ends before the weekly rest is due.
 - **Defaults are eager.** `extended_driving: eager` and `daily_rest_type: reduced_eager` are the
-  defaults, so the `fastest` preset (which is the default policy) is the fastest.
+  defaults, so the `fastest` preset (the default policy) takes the shortest legal rests and extends
+  the day whenever the rules allow it.
   `extend_rest_max_minutes` bounds `extend_rest_to`, so a 06:00 target never adds 23 h.
 
 ## Presets

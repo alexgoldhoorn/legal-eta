@@ -11,6 +11,7 @@ from hypothesis import strategies as st
 
 from legaleta.clock import Clock
 from legaleta.policy import PRESETS as POLICIES
+from legaleta.policy import policy_from
 from legaleta.rules import PRESETS
 from legaleta.scheduler import SchedulingError, plan
 from legaleta.state import DriverState, from_remaining, replay, to_remaining
@@ -241,6 +242,30 @@ def test_compensation_paid_before_waiting_for_the_next_week(preset: str) -> None
     res = plan([Drive(180)], state, R, POLICIES[preset], CLOCK)
     assert_legal(res, state, R, CLOCK)
     assert [b.kind for b in res.blocks if b.kind != "drive"][:2] == ["daily_rest", "weekly_rest"]
+    assert res.end_state.compensation_owed_minutes == 0
+    # the wait still ends when the week starts (the re-review found it overran by the
+    # time already elapsed, because the debt rest is built with start 0)
+    weekly = next(b for b in res.blocks if b.kind == "weekly_rest")
+    assert weekly.end == CLOCK.next_week_start(weekly.start)
+
+
+@pytest.mark.parametrize("preset", sorted(POLICIES))
+@pytest.mark.parametrize("target", ["18:00", "20:00", "22:00"])
+def test_extend_rest_to_never_pushes_the_debt_rest_past_the_weekly_deadline(
+    preset: str, target: str
+) -> None:
+    """Found by the final re-review: `extend_rest_to` stretched the daily rest carrying the
+    debt past the weekly rest's start-by, and the plannable state raised SchedulingError."""
+    state = DriverState(
+        last_weekly_rest_end=-6480,
+        last_weekly_rest_reduced=True,
+        compensation_owed_minutes=900,
+        compensation_deadline=3600,
+    )
+    res = plan([Drive(601)], state, R, policy_from(preset, {"extend_rest_to": target}), CLOCK)
+    assert_legal(res, state, R, CLOCK)
+    payer = next(b for b in res.blocks if b.compensation_minutes)
+    assert payer.kind == "daily_rest" and payer.end <= 2160
     assert res.end_state.compensation_owed_minutes == 0
 
 
