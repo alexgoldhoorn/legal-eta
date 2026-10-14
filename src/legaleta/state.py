@@ -184,6 +184,12 @@ def _apply_rest(state: DriverState, block: Block, rules: RuleSet, clock: Clock) 
 
 
 def _pay_compensation(state: DriverState, block: Block, rules: RuleSet, base: int) -> DriverState:
+    """Pay the compensation debt in full, or not at all.
+
+    Debts are aggregated under the earliest deadline. This is conservative (a plan judged
+    legal is legal) and sufficient for v0.1: the scheduler pays the debt at the next weekly
+    rest and does not use consecutive reduced weekly rests.
+    """
     comp = block.compensation_minutes
     if comp <= 0 or state.compensation_owed_minutes == 0:
         return state

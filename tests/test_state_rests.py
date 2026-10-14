@@ -159,3 +159,10 @@ def test_weekly_block_below_reduced_minimum_acts_as_a_daily_rest_only(clock: Clo
     )
     assert s.last_weekly_rest_end == 0 and s.compensation_owed_minutes == 0
     assert s.driving_today == 0 and s.last_daily_rest_end == 1000
+
+
+def test_v9_interruptions_are_subtracted_before_classifying_the_rest(clock: Clock) -> None:
+    # 700 min block, 55 min interrupted: 645 rest minutes is reduced (< 660), not regular
+    b = Block("daily_rest", 0, 700, subtype="regular", at="ferry", interruptions=(25, 30))
+    s = apply(DriverState(driving_today=400), b, R, clock)
+    assert s.reduced_daily_rests_used == 1 and s.last_daily_rest_end == 700
