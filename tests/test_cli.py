@@ -68,3 +68,24 @@ def test_impossible_state_exit_1_no_traceback() -> None:
     code, out, err = run(["plan"], req)
     assert code == 1 and out == ""
     assert "admits no legal plan" in err and "Traceback" not in err
+
+
+def test_duplicate_stop_id_exit_2() -> None:
+    stop = {"kind": "stop", "id": "A"}
+    req = {
+        "start": "2026-10-20T06:00:00+02:00",
+        "route": [stop, {"kind": "drive", "minutes": 5}, stop],
+    }
+    code, out, err = run(["plan"], req)
+    assert code == 2 and out == "" and "duplicate route item id" in err
+    assert "internal error" not in err
+
+
+def test_bad_rule_override_exit_2() -> None:
+    req = {
+        "start": "2026-10-20T06:00:00+02:00",
+        "route": [{"kind": "drive", "minutes": 60}],
+        "rules": {"overrides": {"break_full": -5}},
+    }
+    code, out, err = run(["plan"], req)
+    assert code == 2 and "break_full" in err

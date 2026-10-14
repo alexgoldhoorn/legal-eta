@@ -16,7 +16,7 @@ from legaleta.policy import Policy, policy_from
 from legaleta.rules import RuleSet, rules_from
 from legaleta.scheduler import PlanResult
 from legaleta.state import DriverState, from_remaining, to_remaining
-from legaleta.timeline import Block, Drive, Ferry, RouteItem, Stop
+from legaleta.timeline import Block, Drive, Ferry, RouteItem, Stop, merge_drives
 
 
 class _Strict(BaseModel):
@@ -261,7 +261,8 @@ def make_route(req: PlanRequest, clock: Clock) -> list[RouteItem]:
             )
         else:
             out.append(Ferry(item.id, item.minutes, item.sleeper_cabin, item.boarding_minutes))
-    return out
+    # duplicate ids and an all-zero route are the caller's error: raise it here, not in plan()
+    return merge_drives(out)
 
 
 def make_blocks(req: ValidateRequest, clock: Clock) -> list[Block]:

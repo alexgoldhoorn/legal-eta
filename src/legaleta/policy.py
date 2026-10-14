@@ -36,6 +36,20 @@ class RestWindow:
     hard: bool = False
     weight: float = 1.0
 
+    def __post_init__(self) -> None:
+        for key in ("earliest", "latest"):
+            v = getattr(self, key)
+            if isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= 1439:
+                raise ValueError(f"rest_start_window.{key} must be a minute of the day (0..1439)")
+        if self.earliest == self.latest:
+            raise ValueError("rest_start_window: earliest and latest must differ")
+        if not isinstance(self.hard, bool):
+            raise ValueError("rest_start_window.hard must be a boolean")
+        if isinstance(self.weight, bool) or not isinstance(self.weight, (int, float)):
+            raise ValueError("rest_start_window.weight must be a number")
+        if self.weight < 0:
+            raise ValueError("rest_start_window.weight must be >= 0")
+
     def contains(self, minute_of_day: int) -> bool:
         if self.earliest <= self.latest:
             return self.earliest <= minute_of_day <= self.latest
@@ -111,11 +125,14 @@ def _parse_window(value: object) -> RestWindow | None:
         return None
     if not isinstance(value, Mapping) or "earliest" not in value or "latest" not in value:
         raise ValueError("rest_start_window must be null or {earliest, latest, hard?, weight?}")
+    unknown = set(value) - {"earliest", "latest", "hard", "weight"}
+    if unknown:
+        raise ValueError(f"rest_start_window: unknown field {sorted(unknown)[0]!r}")
     return RestWindow(
         earliest=parse_hhmm(str(value["earliest"])),
         latest=parse_hhmm(str(value["latest"])),
-        hard=bool(value.get("hard", False)),
-        weight=float(value.get("weight", 1.0)),
+        hard=value.get("hard", False),
+        weight=value.get("weight", 1.0),
     )
 
 

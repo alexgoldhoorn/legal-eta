@@ -60,3 +60,27 @@ def test_bool_override_and_type_checks() -> None:
 
 def test_default_ruleset_is_the_preset() -> None:
     assert RuleSet() == PRESETS["eu561"]
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "needle"),
+    [
+        ("break_full", -5, "'break_full' must be > 0"),
+        ("break_after_driving", 0, "'break_after_driving' must be > 0"),
+        ("daily_window", 0, "'daily_window' must be > 0"),
+        (
+            "reduced_daily_rests_between_weekly",
+            -1,
+            "'reduced_daily_rests_between_weekly' must be >= 0",
+        ),
+        ("ferry_interruptions_max", -1, "'ferry_interruptions_max' must be >= 0"),
+    ],
+)
+def test_override_ranges(key: str, value: int, needle: str) -> None:
+    with pytest.raises(ValueError, match=needle):
+        rules_from("eu561", {key: value})
+
+
+def test_count_overrides_may_be_zero() -> None:
+    r = rules_from("eu561", {"reduced_daily_rests_between_weekly": 0, "extended_days_per_week": 0})
+    assert r.reduced_daily_rests_between_weekly == 0 and r.extended_days_per_week == 0

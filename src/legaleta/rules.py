@@ -47,6 +47,13 @@ class RuleSet:
 PRESETS: dict[str, RuleSet] = {"eu561": RuleSet()}
 
 _NOT_OVERRIDABLE = {"name", "overrides"}
+# integer fields that count something and may be 0; every other integer field is minutes > 0
+_COUNTS = {
+    "extended_days_per_week",
+    "reduced_daily_rests_between_weekly",
+    "compensation_deadline_weeks",
+    "ferry_interruptions_max",
+}
 
 
 def rules_from(preset: str = "eu561", overrides: Mapping[str, object] | None = None) -> RuleSet:
@@ -64,4 +71,8 @@ def rules_from(preset: str = "eu561", overrides: Mapping[str, object] | None = N
             raise ValueError(f"rule {key!r} must be a boolean")
         if expected is int and (isinstance(value, bool) or not isinstance(value, int)):
             raise ValueError(f"rule {key!r} must be an integer number of minutes")
+        if expected is int and key in _COUNTS and value < 0:  # type: ignore[operator]
+            raise ValueError(f"rule {key!r} must be >= 0")
+        if expected is int and key not in _COUNTS and value <= 0:  # type: ignore[operator]
+            raise ValueError(f"rule {key!r} must be > 0 minutes")
     return replace(base, name=preset, overrides=ov, **ov)  # type: ignore[arg-type]

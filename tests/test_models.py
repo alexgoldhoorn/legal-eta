@@ -291,3 +291,46 @@ def test_validate_and_project_with_driver_forms() -> None:
         is None
     )
     assert project_json({"start": p, "activity": "other_work", "minutes": 10})["envelope"]
+
+
+@pytest.mark.parametrize(
+    ("name", "fn"),
+    [
+        ("plan_request.json", plan_json),
+        ("validate_request.json", validate_json),
+        ("project_request.json", project_json),
+    ],
+)
+def test_examples_run(name: str, fn) -> None:  # type: ignore[no-untyped-def]
+    out = fn(json.loads((Path("examples") / name).read_text()))
+    assert out["disclaimer"] == "Planning aid, not legal advice."
+
+
+DRIVE = {"kind": "drive", "minutes": 60}
+STOP = {"kind": "stop", "id": "A"}
+
+
+@pytest.mark.parametrize(
+    ("change", "needle"),
+    [
+        ({"route": [STOP, DRIVE, STOP]}, "duplicate route item id 'A'"),
+        ({"route": [{"kind": "drive", "minutes": 0}]}, "route is empty"),
+        ({"rules": {"overrides": {"break_full": -5}}}, "'break_full' must be > 0"),
+        ({"rules": {"overrides": {"daily_window": 0}}}, "'daily_window' must be > 0"),
+        (
+            {
+                "policy": {
+                    "overrides": {
+                        "rest_start_window": {"earliest": "20:00", "latest": "22:00", "hard": "no"}
+                    }
+                }
+            },
+            "hard must be a boolean",
+        ),
+    ],
+)
+def test_construction_errors_are_request_errors(change: dict[str, object], needle: str) -> None:
+    # I8: these used to escape as a bare ValueError (CLI exit 1, "internal error")
+    req = {"start": "2026-10-20T06:00:00+02:00", "route": [DRIVE], **change}
+    with pytest.raises(RequestError, match=needle):
+        plan_json(req)

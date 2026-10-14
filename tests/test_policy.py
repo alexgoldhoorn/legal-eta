@@ -69,3 +69,27 @@ def test_invalid_values_rejected() -> None:
         policy_from("lazy")
     with pytest.raises(ValueError, match="lookahead_stops"):
         policy_from("fastest", {"lookahead_stops": 0})
+
+
+@pytest.mark.parametrize(
+    ("window", "needle"),
+    [
+        ({"earliest": "18:00", "latest": "23:00", "hard": "false"}, "hard must be a boolean"),
+        ({"earliest": "18:00", "latest": "23:00", "weight": -1}, "weight must be >= 0"),
+        ({"earliest": "18:00", "latest": "23:00", "weight": "x"}, "weight must be a number"),
+        ({"earliest": "18:00", "latest": "18:00"}, "must differ"),
+        ({"earliest": "24:00", "latest": "23:00"}, "HH:MM"),
+        ({"earliest": "18:00", "latest": "23:00", "soft": True}, "unknown field 'soft'"),
+    ],
+)
+def test_rest_window_validated(window: dict[str, object], needle: str) -> None:
+    with pytest.raises(ValueError, match=needle):
+        policy_from("fastest", {"rest_start_window": window})
+
+
+def test_rest_window_range_checked_directly() -> None:
+    with pytest.raises(ValueError, match="minute of the day"):
+        RestWindow(0, 1440)
+    with pytest.raises(ValueError, match="minute of the day"):
+        RestWindow(-1, 60)
+    assert RestWindow(1380, 300, weight=0).contains(0)  # across midnight, weight 0 allowed

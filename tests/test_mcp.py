@@ -64,3 +64,10 @@ def test_schema_resource_and_main(monkeypatch: Any) -> None:
     monkeypatch.setattr(server, "run", lambda transport: called.append(transport))
     mcp_server.main()
     assert called == ["stdio"]
+
+
+def test_plan_route_tool_reports_duplicate_ids_as_error() -> None:
+    stop = {"kind": "stop", "id": "A"}
+    req = {"start": "2026-10-20T06:00:00+02:00", "route": [stop, stop]}
+    body = call("plan_route", req)
+    assert "duplicate route item id" in body["error"] and body["disclaimer"]
