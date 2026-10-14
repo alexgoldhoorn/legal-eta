@@ -1,0 +1,133 @@
+{
+ "start": "2026-10-19T06:00:00+02:00",
+ "week_timezone": "Europe/Madrid",
+ "route": [
+  {
+   "kind": "drive",
+   "minutes": 291
+  },
+  {
+   "kind": "stop",
+   "id": "F5_pickup",
+   "service_minutes": 30,
+   "driver_works": true,
+   "window": {
+    "earliest": "2026-10-19T10:00:00+02:00"
+   },
+   "rest_allowed": false
+  },
+  {
+   "kind": "drive",
+   "minutes": 236
+  },
+  {
+   "kind": "stop",
+   "id": "F5_delivery",
+   "service_minutes": 30,
+   "driver_works": true,
+   "window": {
+    "latest": "2026-10-19T19:00:00+02:00"
+   },
+   "rest_allowed": true
+  },
+  {
+   "kind": "drive",
+   "minutes": 192
+  },
+  {
+   "kind": "stop",
+   "id": "F9_pickup",
+   "service_minutes": 30,
+   "driver_works": true,
+   "window": {
+    "earliest": "2026-10-19T14:00:00+02:00"
+   },
+   "rest_allowed": false
+  },
+  {
+   "kind": "drive",
+   "minutes": 213
+  },
+  {
+   "kind": "stop",
+   "id": "F9_delivery",
+   "service_minutes": 30,
+   "driver_works": true,
+   "window": {
+    "latest": "2026-10-19T18:00:00+02:00"
+   },
+   "rest_allowed": true
+  },
+  {
+   "kind": "drive",
+   "minutes": 1
+  },
+  {
+   "kind": "stop",
+   "id": "F14_pickup",
+   "service_minutes": 30,
+   "driver_works": true,
+   "window": {
+    "earliest": "2026-10-19T19:00:00+02:00"
+   },
+   "rest_allowed": false
+  },
+  {
+   "kind": "drive",
+   "minutes": 304
+  },
+  {
+   "kind": "stop",
+   "id": "F14_delivery",
+   "service_minutes": 30,
+   "driver_works": true,
+   "window": {
+    "latest": "2026-10-20T00:00:00+02:00"
+   },
+   "rest_allowed": true
+  },
+  {
+   "kind": "drive",
+   "minutes": 421
+  },
+  {
+   "kind": "stop",
+   "id": "F15_pickup",
+   "service_minutes": 30,
+   "driver_works": true,
+   "window": {
+    "earliest": "2026-10-19T20:00:00+02:00"
+   },
+   "rest_allowed": false
+  },
+  {
+   "kind": "drive",
+   "minutes": 593
+  },
+  {
+   "kind": "stop",
+   "id": "F15_delivery",
+   "service_minutes": 30,
+   "driver_works": true,
+   "window": {
+    "latest": "2026-10-20T08:00:00+02:00"
+   },
+   "rest_allowed": true
+  },
+  {
+   "kind": "drive",
+   "minutes": 455
+  },
+  {
+   "kind": "stop",
+   "id": "base",
+   "service_minutes": 0,
+   "tags": [
+    "depot"
+   ]
+  }
+ ],
+ "policy": {
+  "preset": "fastest"
+ }
+}

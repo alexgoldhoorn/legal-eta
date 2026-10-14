@@ -1,0 +1,105 @@
+{
+ "start": "2026-10-19T06:00:00+02:00",
+ "week_timezone": "Europe/Madrid",
+ "route": [
+  {
+   "kind": "drive",
+   "minutes": 1
+  },
+  {
+   "kind": "stop",
+   "id": "F1_pickup",
+   "service_minutes": 30,
+   "driver_works": true,
+   "window": {
+    "earliest": "2026-10-19T06:00:00+02:00"
+   },
+   "rest_allowed": false
+  },
+  {
+   "kind": "drive",
+   "minutes": 404
+  },
+  {
+   "kind": "stop",
+   "id": "F1_delivery",
+   "service_minutes": 30,
+   "driver_works": true,
+   "window": {
+    "latest": "2026-10-19T21:00:00+02:00"
+   },
+   "rest_allowed": true
+  },
+  {
+   "kind": "drive",
+   "minutes": 1
+  },
+  {
+   "kind": "stop",
+   "id": "F7_pickup",
+   "service_minutes": 30,
+   "driver_works": true,
+   "window": {
+    "earliest": "2026-10-19T12:00:00+02:00"
+   },
+   "rest_allowed": false
+  },
+  {
+   "kind": "drive",
+   "minutes": 556
+  },
+  {
+   "kind": "stop",
+   "id": "F7_delivery",
+   "service_minutes": 30,
+   "driver_works": true,
+   "window": {
+    "latest": "2026-10-19T20:00:00+02:00"
+   },
+   "rest_allowed": true
+  },
+  {
+   "kind": "drive",
+   "minutes": 468
+  },
+  {
+   "kind": "stop",
+   "id": "F11_pickup",
+   "service_minutes": 30,
+   "driver_works": true,
+   "window": {
+    "earliest": "2026-10-19T16:00:00+02:00"
+   },
+   "rest_allowed": false
+  },
+  {
+   "kind": "drive",
+   "minutes": 219
+  },
+  {
+   "kind": "stop",
+   "id": "F11_delivery",
+   "service_minutes": 30,
+   "driver_works": true,
+   "window": {
+    "latest": "2026-10-19T21:00:00+02:00"
+   },
+   "rest_allowed": true
+  },
+  {
+   "kind": "drive",
+   "minutes": 338
+  },
+  {
+   "kind": "stop",
+   "id": "base",
+   "service_minutes": 0,
+   "tags": [
+    "depot"
+   ]
+  }
+ ],
+ "policy": {
+  "preset": "fastest"
+ }
+}

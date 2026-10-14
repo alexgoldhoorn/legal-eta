@@ -1,0 +1,116 @@
+{
+ "benelux_V1": {
+  "arrival": "2026-10-20T12:47:00+02:00",
+  "blocks": 19,
+  "legal_minutes": 1847,
+  "naive_minutes": 1172
+ },
+ "benelux_V2": {
+  "arrival": "2026-10-20T06:11:00+02:00",
+  "blocks": 18,
+  "legal_minutes": 1451,
+  "naive_minutes": 881
+ },
+ "benelux_V3": {
+  "arrival": "2026-10-20T13:15:00+02:00",
+  "blocks": 18,
+  "legal_minutes": 1875,
+  "naive_minutes": 1200
+ },
+ "benelux_V4": {
+  "arrival": "2026-10-20T13:35:00+02:00",
+  "blocks": 19,
+  "legal_minutes": 1895,
+  "naive_minutes": 1265
+ },
+ "eu_longhaul_V1": {
+  "arrival": "2026-11-02T06:07:00+01:00",
+  "blocks": 59,
+  "legal_minutes": 20227,
+  "naive_minutes": 5902
+ },
+ "eu_longhaul_V2": {
+  "arrival": "2026-10-26T10:02:00+01:00",
+  "blocks": 38,
+  "legal_minutes": 10382,
+  "naive_minutes": 4007
+ },
+ "eu_longhaul_V3": {
+  "arrival": "2026-10-26T00:40:00+01:00",
+  "blocks": 36,
+  "legal_minutes": 9820,
+  "naive_minutes": 3520
+ },
+ "eu_longhaul_V4": {
+  "arrival": "2026-10-26T11:10:00+01:00",
+  "blocks": 40,
+  "legal_minutes": 10450,
+  "naive_minutes": 3955
+ },
+ "iberia_V1": {
+  "arrival": "2026-10-22T00:52:00+02:00",
+  "blocks": 27,
+  "legal_minutes": 4012,
+  "naive_minutes": 2167
+ },
+ "iberia_V2": {
+  "arrival": "2026-10-22T16:40:00+02:00",
+  "blocks": 24,
+  "legal_minutes": 4960,
+  "naive_minutes": 2500
+ },
+ "iberia_V3": {
+  "arrival": "2026-10-22T19:56:00+02:00",
+  "blocks": 27,
+  "legal_minutes": 5156,
+  "naive_minutes": 2651
+ },
+ "iberia_V4": {
+  "arrival": "2026-10-22T03:31:00+02:00",
+  "blocks": 28,
+  "legal_minutes": 4171,
+  "naive_minutes": 2326
+ },
+ "iberia_V5": {
+  "arrival": "2026-10-23T02:21:00+02:00",
+  "blocks": 35,
+  "legal_minutes": 5541,
+  "naive_minutes": 2946
+ },
+ "mixed_V1": {
+  "arrival": "2026-11-24T17:47:00+01:00",
+  "blocks": 142,
+  "legal_minutes": 52607,
+  "naive_minutes": 15865
+ },
+ "mixed_V2": {
+  "arrival": "2026-11-17T08:26:00+01:00",
+  "blocks": 117,
+  "legal_minutes": 41966,
+  "naive_minutes": 12325
+ },
+ "mixed_V3": {
+  "arrival": "2026-11-09T22:29:00+01:00",
+  "blocks": 86,
+  "legal_minutes": 31289,
+  "naive_minutes": 9704
+ },
+ "mixed_V4": {
+  "arrival": "2026-11-10T07:48:00+01:00",
+  "blocks": 84,
+  "legal_minutes": 31848,
+  "naive_minutes": 9978
+ },
+ "mixed_V5": {
+  "arrival": "2026-11-19T07:35:00+01:00",
+  "blocks": 111,
+  "legal_minutes": 44795,
+  "naive_minutes": 13295
+ },
+ "mixed_V6": {
+  "arrival": "2026-11-18T12:39:00+01:00",
+  "blocks": 107,
+  "legal_minutes": 43659,
+  "naive_minutes": 12729
+ }
+}
