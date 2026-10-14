@@ -80,14 +80,21 @@ Response: `state` (`{raw, remaining}` at the horizon), `envelope` (what is still
   The message names the offending field. CLI: message on stderr, exit code 2.
 - **No legal plan** (`SchedulingError`): the request is well formed but no legal schedule exists. CLI:
   `cannot plan: ...` on stderr, exit code 1. Causes:
-  1. `the driver state admits no legal plan: ...` The initial state cannot be made legal, for example three
-     reduced daily rests are used and a regular rest can no longer fit inside the 24 h window.
-  2. `no legal plan through ...` A crossing without a sleeper cabin is longer than the time left in the 24 h
-     period. Without a bunk the crossing is only a break. The longest crossing without a cabin that can
-     be planned is about 13 h when a reduced rest is still available, about 11 h otherwise.
-  3. `no legal plan through ...` A ferry sequence where no on-board or port rest fits.
-  Other messages cover a driver who cannot legally drive again within the plan and a simulation that
-  made no progress; both point at the driver state or the rule overrides.
+  1. `the driver state admits no legal plan: ...` (followed by the checker's violations). The initial
+     state cannot be made legal, for example three reduced daily rests are used and a regular rest can no
+     longer fit inside the 24 h window.
+  2. `no legal plan through stop X` / `through the ferry`: `its waiting, service or crossing time leaves no
+     room for a daily or weekly rest in time`. This applies to stops as well as ferries: a long wait for a
+     window, or a service time, that overruns the rest deadline. For a ferry without a sleeper cabin the
+     crossing counts as a break, not a rest, so the daily rest must be taken at the port before boarding
+     (the scheduler offers that) and the crossing must then fit inside the 24 h period that follows. In
+     practice crossings up to 15 h without a cabin planned in every case tried; longer ones raise. The
+     pinned example is `test_crossing_too_long_for_any_rest_raises`.
+  3. `the driver cannot legally drive again within this plan; check the driver state`: at a point where
+     driving must go on, no legal choice exists and even waiting for the next week to begin does not let the
+     driver drive again.
+  4. `no progress after 100000 steps; check the driver state and rule overrides`: an internal guard that
+     should not occur.
 - Any other exception is an internal error (CLI exit code 1, prefixed `internal error:`).
 
 The MCP tools return `{"error": "...", "disclaimer": "..."}` for both a bad request and a scheduling error.

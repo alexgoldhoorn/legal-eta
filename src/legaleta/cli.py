@@ -26,7 +26,7 @@ def _parser() -> argparse.ArgumentParser:
         description="EU driving-time scheduler (Regulation (EC) 561/2006).\n" + DISCLAIMER,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Reads one JSON request on stdin and writes one JSON response on stdout. "
-        "Exit codes: 0 ok, 2 invalid input, 1 internal error.",
+        "Exit codes: 0 ok, 2 invalid input, 1 no legal plan or internal error.",
     )
     p.add_argument("--version", action="version", version=f"legaleta {__version__}")
     sub = p.add_subparsers(dest="command", required=True)

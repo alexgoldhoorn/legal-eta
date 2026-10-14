@@ -12,8 +12,8 @@ operator remain responsible for compliance. See *What is modelled* below for the
 ## Why it matters
 
 A route that ignores the driving-time rules arrives much earlier than the same route driven legally.
-Planned against a public freight-dispatch simulator (the author's own), 19 routes in four datasets arrive
-50 to 243 % later once breaks and rests are inserted:
+On these fixtures, built from a public freight-dispatch simulator (the author's own), 19 routes in four
+datasets arrive 50 to 243 % later once breaks and rests are inserted:
 
 | Dataset | Routes | Naive duration | Legal duration | Later by |
 |---|---|---|---|---|
@@ -25,11 +25,13 @@ Planned against a public freight-dispatch simulator (the author's own), 19 route
 "Naive" is driving plus service plus waiting for delivery windows, with no breaks or rests. The gaps are
 larger than a single-day route would show: multi-day routes add daily and weekly rests, and routes that need
 more than 90 h of driving must also wait for the fortnight limit. The routes and the exact numbers are in
-`tests/fixtures/sim/`.
+`tests/fixtures/sim/`. The simulator's freights carry tight delivery windows over long multi-stop chains,
+which inflates lateness and the waiting-for-window component (and "naive" already includes window waits),
+so these figures are specific to the fixtures, not typical.
 
 ## Install
 
-    pip install legaleta            # library + CLI
+    pip install legaleta            # library + CLI (pending publication: not on PyPI yet)
     pip install "legaleta[mcp]"     # + MCP server
 
 ## Quick start
@@ -103,10 +105,11 @@ Errors:
   message on stderr; the MCP tools return `{"error": ..., "disclaimer": ...}`.
 - No legal plan exists (`SchedulingError`): CLI exit code 1, message on stderr; the MCP tools return the same
   `error` object. Causes: the initial driver state cannot be made legal (for example three reduced daily rests
-  are used and a regular rest no longer fits in the 24 h window); a ferry crossing without a sleeper cabin that
-  is longer than the time left in the 24 h period (without a bunk it is only a break; the longest such crossing
-  is about 13 h with a reduced rest available, about 11 h otherwise); or a ferry sequence where no on-board or
-  port rest fits. Details in `docs/contract.md`.
+  are used and a regular rest no longer fits in the 24 h window); a stop or ferry whose waiting, service or
+  crossing time leaves no room for a daily or weekly rest in time (a ferry crossing without a sleeper cabin
+  counts as a break, so the rest is taken at the port and the crossing must fit in the 24 h after it; crossings
+  up to 15 h planned in every case tried, longer ones raise); a driver who cannot legally drive again within
+  the plan; and an internal no-progress guard that should not occur. Details in `docs/contract.md`.
 
 ## MCP server
 
