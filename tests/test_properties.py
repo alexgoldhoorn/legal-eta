@@ -6,7 +6,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pytest
-from hypothesis import assume, given, settings
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from legaleta.clock import Clock
@@ -56,10 +56,15 @@ routes = st.lists(st.one_of(drives, stops(), ferries()), min_size=1, max_size=40
 @st.composite
 def states(draw: st.DrawFn) -> DriverState:
     driving_today = draw(st.integers(0, 540))
-    last_daily_rest_end = draw(st.integers(-900, 0))
+    # covers the band where the 24 h period ends less than 9 h after the start (I1) and
+    # periods that lapsed before it
+    last_daily_rest_end = draw(st.integers(-1700, 0))
     reduced_used = draw(st.integers(0, 3))
-    # a regular rest at t=0 would count as reduced (Art 8(2)) with no reduced rest left
-    assume(not (reduced_used == 3 and last_daily_rest_end < -780))
+    # an optional compensation debt whose deadline leaves room for a regular weekly rest
+    # carrying it (a daily rest at t=0 may be unusable: Art 8(2) with Art 8(4))
+    owed = draw(st.sampled_from([0, 0, 60, 900, 1260]))
+    room = owed + R.weekly_rest_regular
+    deadline = None if owed == 0 else draw(st.integers(room, room + 6000))
     return DriverState(
         driving_since_break=draw(st.integers(0, min(270, driving_today))),
         split_break_first_part_taken=draw(st.booleans()),
@@ -73,6 +78,8 @@ def states(draw: st.DrawFn) -> DriverState:
         # the weekly deadline must not have lapsed before t=0 plus a daily window
         last_weekly_rest_end=draw(st.integers(-8640 + 1440, 0)),
         last_weekly_rest_reduced=draw(st.booleans()),
+        compensation_owed_minutes=owed,
+        compensation_deadline=deadline,
     )
 
 
@@ -97,8 +104,19 @@ def test_remaining_round_trip(state: DriverState) -> None:
     assert back == state
 
 
-def test_known_impossible_state_raises() -> None:
+@pytest.mark.parametrize("preset", sorted(POLICIES))
+def test_no_legal_daily_rest_opens_with_a_weekly_rest(preset: str) -> None:
+    # once thought impossible: no daily rest at t=0 is legal (Art 8(2) + Art 8(4)), but a
+    # weekly rest is (I2)
     state = DriverState(last_daily_rest_end=-840, reduced_daily_rests_used=3)
+    res = plan([Drive(60)], state, R, POLICIES[preset], CLOCK)
+    assert res.blocks[0].kind == "weekly_rest" and res.blocks[0].start == 0
+    assert_legal(res, state, R, CLOCK)
+
+
+def test_known_impossible_state_raises() -> None:
+    # compensation due before any rest carrying it can end (Art 8(6b))
+    state = DriverState(compensation_owed_minutes=900, compensation_deadline=100)
     with pytest.raises(SchedulingError, match="no legal plan"):
         plan([Drive(60)], state, R, POLICIES["fastest"], CLOCK)
 

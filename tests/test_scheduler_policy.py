@@ -281,12 +281,15 @@ HARD_EVENING = {"rest_start_window": {"earliest": "20:00", "latest": "22:00", "h
 
 
 def test_hard_window_at_sleeper_ferry_falls_back_with_warning(clock: Clock) -> None:
-    # only daily rests on board unblock, and the hard window drops them all
+    # the 6 h crossing is too short for a 9 h rest on board, and an interrupted reduced rest is
+    # not allowed (Art 9(1)): the only legal rest is at the port, outside the hard window
     s = DriverState(last_daily_rest_end=-300, last_weekly_rest_reduced=True)
     route = [Drive(500), Ferry("F", 360, sleeper_cabin=True, boarding_minutes=30), Drive(100)]
     res = plan(route, s, R, policy_from("fastest", HARD_EVENING), clock)
     assert "PREFERENCE_UNMET:rest_start_window" in codes(res)
-    assert any(b.kind == "daily_rest" and b.at == "F" for b in res.blocks)
+    rests = [b for b in res.blocks if b.kind == "daily_rest"]
+    assert [(b.at, b.interruptions) for b in rests] == [(None, ())]
+    assert "at the port before boarding" in rests[0].reason
     assert_legal(res, s, R, clock)
 
 

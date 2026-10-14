@@ -192,12 +192,20 @@ def _pay_compensation(state: DriverState, block: Block, rules: RuleSet, base: in
 
     Debts are aggregated under the earliest deadline. This is conservative (a plan judged
     legal is legal) and sufficient for v0.1: the scheduler pays the debt at the next weekly
-    rest and does not use consecutive reduced weekly rests.
+    rest (or at a daily rest when that weekly rest could end after the deadline) and does not
+    use consecutive reduced weekly rests. A rest that ends after the deadline pays nothing: the
+    debt stays owed, and the checker reports it at the deadline.
     """
     comp = block.compensation_minutes
     if comp <= 0 or state.compensation_owed_minutes == 0:
         return state
-    if base >= rules.compensation_attach_min_rest and comp >= state.compensation_owed_minutes:
+    # Art 8(6b): taken before the end of the third following week; a later rest does not pay
+    on_time = state.compensation_deadline is None or block.end <= state.compensation_deadline
+    if (
+        on_time
+        and base >= rules.compensation_attach_min_rest
+        and comp >= state.compensation_owed_minutes
+    ):
         return replace(state, compensation_owed_minutes=0, compensation_deadline=None)
     return state
 
@@ -207,11 +215,7 @@ def apply(state: DriverState, block: Block, rules: RuleSet, clock: Clock) -> Dri
     if block.kind == "drive":
         return _apply_drive(state, block, rules, clock)
     state = _roll_weeks(state, block.start, block.end, clock)
-    if (
-        block.kind == "break"
-        or block.kind == "ferry"
-        or (block.kind == "wait" and block.counts_as_rest)
-    ):
+    if block.kind == "break" or (block.kind in ("wait", "ferry") and block.counts_as_rest):
         return _apply_break(state, block.minutes, rules)
     if block.kind in ("daily_rest", "weekly_rest"):
         return _apply_rest(state, block, rules, clock)

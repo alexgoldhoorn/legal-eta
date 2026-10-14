@@ -304,8 +304,29 @@ def plan(
             "the driver state admits no legal plan: "
             + "\n".join(f"{v.article}: {v.message}" for v in violations)
         )
-    warnings = list(STANDING_WARNINGS) + list(cur.warnings.values())
+    warnings = list(STANDING_WARNINGS) + _start_warnings(state, rules) + list(cur.warnings.values())
     return PlanResult(cur.blocks, cur.stops, warnings, cur.state, cur.t, rules, policy)
+
+
+def _start_warnings(state: DriverState, rules: RuleSet) -> list[Warning]:
+    """Infringements the driver state brings with it; the plan is judged from the start on."""
+    need = (
+        rules.daily_rest_split_second
+        if state.split_daily_rest_first_part_taken
+        else rules.daily_rest_reduced
+    )
+    if envelope(state, rules, 0).daily_window_ends_in >= need:
+        return []
+    return [
+        Warning(
+            "DAILY_REST_OVERDUE_AT_START",
+            "The 24 h period after the driver's last daily rest ends, or has ended, too soon "
+            "after the start for a daily rest to fit in it. The plan opens with a rest; the "
+            "shortfall in that period comes from the driver state, not from the plan, and the "
+            "next period is counted from its end (Guidance Note 7).",
+            "Art 8(2)",
+        )
+    ]
 
 
 # ---------------------------------------------------------------- simulation loop
@@ -343,6 +364,13 @@ def _emit(ctx: _Ctx, cur: _Cursor, block: Block) -> None:
     block = replace(block, start=cur.t)
     if block.kind in REST_KINDS and not _on_ferry(ctx, block):
         stretched = _extend_rest(ctx, cur, block.kind, block.start, block.minutes)
+        deadline = cur.state.compensation_deadline
+        if (
+            block.compensation_minutes
+            and deadline is not None
+            and block.start + stretched > deadline >= block.end
+        ):
+            stretched = block.minutes  # never stretch a compensating rest past its deadline
         if stretched > block.minutes:
             extra = stretched - block.minutes
             cur.extension_minutes += extra
@@ -504,7 +532,23 @@ def _caps(ctx: _Ctx, cur: _Cursor, env: Envelope) -> list[tuple[int, str]]:
             "the daily rest must start (Art 8(2))",
         ),
         (env.weekly_rest_due_in, "the weekly rest must start (Art 8(6))"),
+        (_compensation_cap(ctx, cur, env), "compensation must be attached (Art 8(6b))"),
     ]
+
+
+_UNBOUNDED = 10**9  # a cap that never binds
+
+
+def _compensation_cap(ctx: _Ctx, cur: _Cursor, env: Envelope) -> int:
+    """Art 8(6b): drive no longer than lets a rest carrying the debt end by its deadline.
+
+    Once the deadline has passed (only possible when the driver state starts too close to it)
+    there is nothing left to protect, and the cap no longer binds.
+    """
+    due = env.compensation_due_in
+    if due is None or due <= 0:
+        return _UNBOUNDED
+    return due - (_shortest_daily_rest(ctx, cur, env) + cur.state.compensation_owed_minutes)
 
 
 def _drive_limit(ctx: _Ctx, cur: _Cursor, env: Envelope) -> int:
@@ -580,7 +624,11 @@ def _compensation_now(ctx: _Ctx, cur: _Cursor, kind: str, sub: str, start_t: int
     env = envelope(s, ctx.rules, start_t)
     if kind == "weekly_rest":
         return s.compensation_owed_minutes
-    if env.compensation_due_in is not None and env.compensation_due_in <= env.weekly_rest_due_in:
+    # pay at this daily rest when the next weekly rest, started at its deadline, could end
+    # after the compensation deadline (Art 8(6b))
+    if env.compensation_due_in is not None and env.compensation_due_in < (
+        env.weekly_rest_due_in + ctx.rules.weekly_rest_regular + s.compensation_owed_minutes
+    ):
         return s.compensation_owed_minutes
     return 0
 
@@ -595,9 +643,10 @@ def _rest_block(
     minutes: int | None = None,
     interruptions: tuple[int, ...] = (),
     place: str = "",
+    compensation: int | None = None,
 ) -> Block:
     base = minutes if minutes is not None else _rest_minutes(ctx, kind, sub)
-    comp = _compensation_now(ctx, cur, kind, sub, start_t)
+    comp = _compensation_now(ctx, cur, kind, sub, start_t) if compensation is None else compensation
     total = base + comp + sum(interruptions)  # extend_rest_to is applied in _emit
     text, article = _REST_TEXT[(kind, sub)]
     inside = _inside_window(ctx, cur, start_t, total)
@@ -668,15 +717,19 @@ def _rest_blocks_with_start(choice: Choice, cur: _Cursor) -> list[tuple[Block, i
     return out
 
 
-def _apply_preferences(ctx: _Ctx, cur: _Cursor, choices: list[Choice]) -> list[Choice]:
+def _apply_preferences(
+    ctx: _Ctx, cur: _Cursor, choices: list[Choice], restorable: bool | None = None
+) -> list[Choice]:
     """policy.rest_places and policy.rest_start_window: drop (hard) or penalise (soft) rests.
 
-    On the road and at a ferry, a knob that would remove every choice, or every daily rest
-    and leave only weekly rests, is dropped instead and warned about.
+    On the road and at a ferry (and for the rest-first fallback anywhere), a knob that would
+    remove every choice, or every daily rest and leave only weekly rests, is dropped instead
+    and warned about.
     """
     p = ctx.policy
     # at a stop "continue" always survives; on the road and at a ferry nothing does
-    restorable = bool(choices) and choices[0].where in ("road", "ferry")
+    if restorable is None:
+        restorable = bool(choices) and choices[0].where in ("road", "ferry")
 
     def is_daily_rest(c: Choice) -> bool:
         return any(b.kind == "daily_rest" for b in c.blocks)
@@ -774,19 +827,39 @@ def _validates(ctx: _Ctx, cur: _Cursor, choice: Choice) -> bool:
 
 
 def _wait_next_week_choice(ctx: _Ctx, cur: _Cursor) -> Choice:
+    r, s = ctx.rules, cur.state
     nxt = ctx.clock.next_week_start(cur.t)
-    minutes = max(nxt - cur.t, ctx.rules.weekly_rest_regular)
+    place = " at the roadside until the next week starts (weekly driving limits reached)"
+    first: tuple[Block, ...] = ()
+    owed, deadline = s.compensation_owed_minutes, s.compensation_deadline
+    if (
+        owed
+        and deadline is not None
+        and cur.t + max(nxt - cur.t, r.weekly_rest_regular) + owed > (deadline)
+    ):
+        # Art 8(6b): the long wait would end after the compensation deadline, so a daily rest
+        # carrying the debt comes first
+        env = envelope(s, r, cur.t)
+        shortest = _shortest_daily_rest(ctx, cur, env)
+        sub = (
+            "split_part_2"
+            if "split_part_2" in env.allowed_daily_rests
+            else ("reduced" if shortest == r.daily_rest_reduced else "regular")
+        )
+        first = (_rest_block(ctx, cur, "daily_rest", sub, None, cur.t, compensation=owed),)
+    t = cur.t + sum(b.minutes for b in first)
     block = _rest_block(
         ctx,
         cur,
         "weekly_rest",
         "regular",
         None,
-        cur.t,
-        minutes=minutes,
-        place=" at the roadside until the next week starts (weekly driving limits reached)",
+        t,
+        minutes=max(nxt - t, r.weekly_rest_regular),
+        place=place,
+        compensation=0 if first else None,
     )
-    return Choice("wait_next_week", (block,), "road")
+    return Choice("wait_next_week", (*first, block), "road")
 
 
 # ---------------------------------------------------------------- decision points
@@ -871,17 +944,22 @@ def _road_choices(ctx: _Ctx, cur: _Cursor) -> list[Choice]:
                     needed_only=_needed_only(ctx, "daily_rest", sub),
                 )
             )
-    if _weekly_relevant(ctx, env):
-        for sub in env.allowed_weekly_rests:
-            if _policy_allows(ctx, env, "weekly_rest", sub):
-                out.append(
-                    Choice(
-                        f"weekly_rest_{sub}",
-                        (_rest_block(ctx, cur, "weekly_rest", sub, None, cur.t),),
-                        "road",
-                        needed_only=_needed_only(ctx, "weekly_rest", sub),
-                    )
-                )
+
+    def weekly_choices() -> list[Choice]:
+        return [
+            Choice(
+                f"weekly_rest_{sub}",
+                (_rest_block(ctx, cur, "weekly_rest", sub, None, cur.t),),
+                "road",
+                needed_only=_needed_only(ctx, "weekly_rest", sub),
+            )
+            for sub in env.allowed_weekly_rests
+            if _policy_allows(ctx, env, "weekly_rest", sub)
+        ]
+
+    weekly_offered = _weekly_relevant(ctx, env)
+    if weekly_offered:
+        out.extend(weekly_choices())
         if "reduced" not in env.allowed_weekly_rests:
             _warn(
                 cur,
@@ -894,7 +972,12 @@ def _road_choices(ctx: _Ctx, cur: _Cursor) -> list[Choice]:
     out = [c for c in out if _unblocks(ctx, cur, c)]
     # a regular rest starting late in its 24 h period counts as reduced (Art 8(2)), illegal
     # once no reduced rest is left (Art 8(4)): drop such a choice while a valid one remains
-    out = [c for c in out if _validates(ctx, cur, c)] or out
+    valid = [c for c in out if _validates(ctx, cur, c)]
+    if not weekly_offered and not any(b.kind == "daily_rest" for c in valid for b in c.blocks):
+        # no daily rest is legal here: a weekly rest is a daily rest too and resets the
+        # reduced-rest count (Art 8(4)), so it is the way out
+        valid += [c for c in weekly_choices() if _unblocks(ctx, cur, c) and _validates(ctx, cur, c)]
+    out = valid or out
     out = _apply_preferences(ctx, cur, out)
     if not out:
         fallback = _wait_next_week_choice(ctx, cur)
@@ -1211,8 +1294,10 @@ def _rests_on_board(
             if ferry.minutes >= probe.minutes:
                 rest = replace(probe, minutes=ferry.minutes)
                 blocks: tuple[Block, ...] = (*boarding, rest)
-            elif sub == "split_part_2":
-                continue  # not modelled: Art 9(1) names the regular daily rest as interruptible
+            elif kind == "daily_rest" and sub != "regular":
+                # Art 9(1) admits an interrupted rest only for a regular daily rest or a
+                # weekly rest: never a reduced daily rest or a part of a split one
+                continue
             elif ferry.boarding_minutes > r.ferry_interruption_total:
                 continue  # Art 9(1) limits only a rest interrupted by boarding
             else:
@@ -1254,7 +1339,13 @@ def _legal(ctx: _Ctx, cur: _Cursor, choice: Choice, honour_policy: bool = True) 
         return True  # the plan ends here; nothing after it is checked
     env = envelope(sim.state, ctx.rules, sim.t)
     min_rest = _shortest_daily_rest(ctx, sim, env, honour_policy)
-    return env.daily_window_ends_in >= min_rest and env.weekly_rest_due_in >= 0
+    due = env.compensation_due_in
+    # Art 8(6b): a rest carrying the debt can still end by its deadline (once the deadline
+    # has passed, validate() above has reported it, or it passed before this choice)
+    compensation_ok = (
+        due is None or due <= 0 or due >= min_rest + sim.state.compensation_owed_minutes
+    )
+    return env.daily_window_ends_in >= min_rest and env.weekly_rest_due_in >= 0 and compensation_ok
 
 
 def _legal_or_rest_first(
@@ -1281,7 +1372,9 @@ def _legal_or_rest_first(
             return legal
         fallback = _rest_first_choices(ctx, cur, where, at, wait, after, honour_policy, then)
         if fallback:
-            return fallback
+            # preferences still rank the fallback rests; one that no rest can honour is
+            # dropped with a warning, never at the cost of a legal plan
+            return _apply_preferences(ctx, cur, fallback, restorable=True)
     what = f"stop {at}" if at is not None else "the ferry"
     raise SchedulingError(
         f"no legal plan through {what}: its waiting, service or crossing time leaves no room "

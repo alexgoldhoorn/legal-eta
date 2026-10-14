@@ -58,8 +58,15 @@ def validate(
     state = initial_state
     window_end = state.last_daily_rest_end + rules.daily_window
     weekly_deadline = state.last_weekly_rest_end + rules.weekly_rest_deadline
-    # deadlines that passed before the timeline starts are the past: restart them (GN 7)
-    while window_end < start:
+    # deadlines that passed before the timeline starts are the past: restart them (GN 7).
+    # A 24 h period ending so soon after the start that no qualifying rest fits in it is
+    # treated the same way: its shortfall is inherited from the driver state, not the timeline.
+    need_at_start = (
+        rules.daily_rest_split_second
+        if state.split_daily_rest_first_part_taken
+        else rules.daily_rest_reduced
+    )
+    while window_end - start < need_at_start:
         window_end += rules.daily_window
     while weekly_deadline < start:
         weekly_deadline += rules.weekly_rest_deadline
@@ -89,14 +96,6 @@ def validate(
             out.append(
                 Violation("Art 4(g)", i, "split_part_2 without a first part of 3 h on record")
             )
-        if b.kind == "weekly_rest" and b.subtype == "reduced" and before.last_weekly_rest_reduced:
-            out.append(
-                Violation(
-                    "Art 8(6)",
-                    i,
-                    "two consecutive reduced weekly rests (international exception not modelled)",
-                )
-            )
         if (
             b.kind in REST_KINDS
             and b.interruptions
@@ -114,13 +113,6 @@ def validate(
                     f"{rules.ferry_interruption_total} min)",
                 )
             )
-        if (
-            b.kind == "weekly_rest"
-            and b.subtype == "regular"
-            and b.in_vehicle
-            and not rules.regular_weekly_rest_in_vehicle
-        ):
-            out.append(Violation("Art 8(8)", i, "regular weekly rest taken in the vehicle"))
         if b.compensation_minutes > 0 and before.compensation_owed_minutes > 0:
             if b.compensation_minutes < before.compensation_owed_minutes:
                 out.append(
@@ -143,6 +135,58 @@ def validate(
 
         state = apply(state, b, rules, clock)
         e = envelope(state, rules, b.end)
+
+        # what apply() made of a rest block, whatever its label claims
+        is_weekly = b.kind == "weekly_rest" and state.last_weekly_rest_end == b.end
+        completes_split = (
+            b.kind == "daily_rest"
+            and b.subtype == "split_part_2"
+            and before.split_daily_rest_first_part_taken
+        )
+        is_regular_daily = (
+            b.kind in REST_KINDS
+            and state.last_daily_rest_end == b.end
+            and state.reduced_daily_rests_used <= before.reduced_daily_rests_used
+            and not completes_split
+        )
+
+        # Art 8(6): no two consecutive reduced weekly rests
+        if is_weekly and state.last_weekly_rest_reduced and before.last_weekly_rest_reduced:
+            out.append(
+                Violation(
+                    "Art 8(6)",
+                    i,
+                    "two consecutive reduced weekly rests (international exception not modelled)",
+                )
+            )
+        # Art 9(1): only a regular daily rest or a weekly rest may be interrupted
+        if b.kind in REST_KINDS and b.interruptions and not (is_weekly or is_regular_daily):
+            out.append(
+                Violation(
+                    "Art 9(1)",
+                    i,
+                    "only a regular daily rest or a weekly rest may be interrupted on a ferry "
+                    "or train; this rest counts as a reduced or split daily rest",
+                )
+            )
+        # Art 8(8): a regular weekly rest, or a compensation rest of more than 45 h, not in
+        # the vehicle
+        if (
+            b.in_vehicle
+            and not rules.regular_weekly_rest_in_vehicle
+            and (
+                (is_weekly and not state.last_weekly_rest_reduced)
+                or (b.compensation_minutes > 0 and b.rest_minutes > rules.weekly_rest_regular)
+            )
+        ):
+            out.append(
+                Violation(
+                    "Art 8(8)",
+                    i,
+                    "regular weekly rest, or compensation rest of more than 45 h, taken in the "
+                    "vehicle",
+                )
+            )
 
         # Art 8(4): counted by apply(), so a rest that Art 8(2) makes reduced counts too
         if (

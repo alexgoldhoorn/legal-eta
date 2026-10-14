@@ -6,7 +6,7 @@ import pytest
 from legaleta.checker import Violation, validate
 from legaleta.clock import Clock
 from legaleta.rules import PRESETS
-from legaleta.state import DriverState
+from legaleta.state import DriverState, replay
 from legaleta.timeline import Block
 
 R = PRESETS["eu561"]
@@ -200,13 +200,13 @@ def test_weekly_rest_block_under_24h_is_not_a_weekly_rest(clock: Clock) -> None:
     assert "no weekly rest started" in vs[0].message
 
 
-def test_second_debt_lapsing_after_first_was_reported_and_paid_is_reported(clock: Clock) -> None:
+def test_second_debt_lapsing_after_first_was_paid_is_reported(clock: Clock) -> None:
     # D1: reduced weekly rest 0-1440 owes 1260, due at the Monday starting the 4th week.
-    # Work past it reports D1 (block 1); a regular weekly rest then repays it in full; a second
-    # reduced weekly rest creates D2, and work past D2's deadline must be reported again.
+    # A regular weekly rest before that deadline repays it in full; a second reduced weekly
+    # rest creates D2, and work past D2's deadline must be reported.
     d1 = clock.week_start_after(1440, R.compensation_deadline_weeks + 1)
-    t_pay = d1 + 100
-    t_red = t_pay + 2700 + 1260 + 100
+    t_pay = d1 - 3960 - 100
+    t_red = t_pay + 3960 + 100
     d2 = clock.week_start_after(t_red + 1440, R.compensation_deadline_weeks + 1)
     blocks = [
         Block("weekly_rest", 0, 1440, subtype="reduced"),
@@ -218,7 +218,22 @@ def test_second_debt_lapsing_after_first_was_reported_and_paid_is_reported(clock
     ]
     vs = validate(blocks, DriverState(), R, clock)
     comp = [v for v in vs if v.article in ("Art 8(6b)", "Art 8(7)")]
-    assert [v.block_index for v in comp] == [1, 5]
+    assert [v.block_index for v in comp] == [5]
+
+
+def test_late_compensation_does_not_pay(clock: Clock) -> None:
+    # I4: the rest carrying the debt ends after the deadline: the debt is reported as still
+    # owed at the deadline, and it stays owed
+    s = DriverState(compensation_owed_minutes=900, compensation_deadline=10)
+    blocks = [Block("daily_rest", 0, 1560, subtype="regular", compensation_minutes=900)]
+    vs = validate(blocks, s, R, clock)
+    assert arts(vs) == ["Art 8(6b)"] and vs[0].block_index == 0
+    assert "900 min of weekly-rest compensation not taken before its deadline" in vs[0].message
+    assert replay(s, blocks, R, clock).compensation_owed_minutes == 900
+    # ending exactly at the deadline pays
+    on_time = DriverState(compensation_owed_minutes=900, compensation_deadline=1560)
+    assert validate(blocks, on_time, R, clock) == []
+    assert replay(on_time, blocks, R, clock).compensation_owed_minutes == 0
 
 
 def test_fourth_edge_rest_counts_as_reduced(clock: Clock) -> None:
@@ -231,3 +246,70 @@ def test_fourth_edge_rest_counts_as_reduced(clock: Clock) -> None:
         t += 1560
     vs = validate(blocks, DriverState(), R, clock)
     assert arts(vs) == ["Art 8(4)"] and vs[0].block_index == 7
+
+
+def test_v9_interrupted_reduced_or_split_daily_rest_is_an_infringement(clock: Clock) -> None:
+    # Art 9(1) admits interruptions only on a regular daily rest or a weekly rest
+    reduced = [Block("daily_rest", 0, 570, subtype="reduced", at="f", interruptions=(30,))]
+    vs = validate(reduced, DriverState(), R, clock)
+    assert arts(vs) == ["Art 9(1)"] and "reduced or split" in vs[0].message
+    # labelled regular, but only 570 min fall inside the period: apply() counts it reduced
+    late = [Block("daily_rest", 0, 690, subtype="regular", at="f", interruptions=(30,))]
+    assert "Art 9(1)" in arts(validate(late, DriverState(last_daily_rest_end=-870), R, clock))
+    split1 = [Block("daily_rest", 0, 200, subtype="split_part_1", interruptions=(20,))]
+    assert arts(validate(split1, DriverState(), R, clock)) == ["Art 9(1)"]
+    split2 = [Block("daily_rest", 0, 560, subtype="split_part_2", interruptions=(20,))]
+    s = DriverState(split_daily_rest_first_part_taken=True)
+    assert arts(validate(split2, s, R, clock)) == ["Art 9(1)"]
+    # a regular daily rest and both weekly rests may be interrupted
+    ok = [Block("daily_rest", 0, 690, subtype="regular", interruptions=(30,))]
+    assert validate(ok, DriverState(), R, clock) == []
+    weekly = [Block("weekly_rest", 0, 1470, subtype="reduced", interruptions=(30,))]
+    assert validate(weekly, DriverState(), R, clock) == []
+
+
+@pytest.mark.parametrize("ended", [-1440, -1200, -901])
+def test_period_ending_too_soon_after_start_is_restarted(clock: Clock, ended: int) -> None:
+    # I1: the 24 h period ends 0 to 539 min after the start, so no rest can fit in it; like a
+    # period that lapsed before the start, its shortfall belongs to the driver state (GN 7)
+    s = DriverState(last_daily_rest_end=ended, driving_today=300)
+    blocks = [Block("daily_rest", 0, 660, subtype="regular"), Block("drive", 660, 60)]
+    assert validate(blocks, s, R, clock) == []
+
+
+def test_period_with_room_for_a_rest_is_not_restarted(clock: Clock) -> None:
+    # 540 min left: a rest still fits, so driving through the end of the period is reported
+    s = DriverState(last_daily_rest_end=-900)
+    vs = validate([Block("work", 0, 600)], s, R, clock)
+    assert arts(vs) == ["Art 8(2)"] and vs[0].excess_minutes == 60
+
+
+def test_weekly_rules_follow_apply_not_labels(clock: Clock) -> None:
+    # I3: no subtype, but apply() makes it a second consecutive reduced weekly rest
+    s = DriverState(last_weekly_rest_reduced=True)
+    assert arts(validate([Block("weekly_rest", 0, 1500)], s, R, clock)) == ["Art 8(6)"]
+    # labelled reduced but 45 h long: a regular weekly rest, not a second reduced one
+    long = [Block("weekly_rest", 0, 2700, subtype="reduced")]
+    assert validate(long, s, R, clock) == []
+    # Art 8(8): a regular weekly rest in the vehicle, with no subtype
+    veh = [Block("weekly_rest", 0, 2700, in_vehicle=True)]
+    assert arts(validate(veh, DriverState(), R, clock)) == ["Art 8(8)"]
+    # a reduced weekly rest may be taken in the vehicle
+    veh_red = [Block("weekly_rest", 0, 1500, in_vehicle=True)]
+    assert validate(veh_red, DriverState(), R, clock) == []
+    # Art 8(8) second clause: a compensation rest of more than 45 h, in the vehicle
+    comp = [Block("daily_rest", 0, 2760, compensation_minutes=2100, in_vehicle=True)]
+    owed = DriverState(compensation_owed_minutes=2100, compensation_deadline=5000)
+    assert arts(validate(comp, owed, R, clock)) == ["Art 8(8)"]
+
+
+def test_ferry_counts_as_break_only_when_flagged(clock: Clock) -> None:
+    # I5: a hand-written ferry block defaults to counts_as_rest=False
+    blocks = [Block("drive", 0, 270), Block("ferry", 270, 45), Block("drive", 315, 270)]
+    assert arts(validate(blocks, DriverState(), R, clock)) == ["Art 7"]
+    flagged = [
+        Block("drive", 0, 270),
+        Block("ferry", 270, 45, counts_as_rest=True),
+        Block("drive", 315, 270),
+    ]
+    assert validate(flagged, DriverState(), R, clock) == []

@@ -58,8 +58,9 @@ def test_impossible_state_exit_1_no_traceback() -> None:
         "start": "2026-10-20T06:00:00+02:00",
         "driver": {
             "raw": {
-                "last_daily_rest_end": "2026-10-19T16:00:00+02:00",
-                "reduced_daily_rests_used": 3,
+                # 900 min of compensation due 100 min after the start (Art 8(6b))
+                "compensation_owed_minutes": 900,
+                "compensation_deadline": "2026-10-20T07:40:00+02:00",
             }
         },
         "route": [{"kind": "drive", "minutes": 60}],

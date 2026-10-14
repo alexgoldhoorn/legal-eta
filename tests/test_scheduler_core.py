@@ -298,14 +298,28 @@ def test_reduced_rest_under_eager_policy_does_not_warn(clock: Clock) -> None:
     assert "DAILY_REST_REDUCED_BY_WINDOW" not in {w.code for w in res.warnings}
 
 
+def test_no_legal_daily_rest_takes_a_weekly_rest(clock: Clock) -> None:
+    # I2: a 660 min rest at t=0 has only 600 min inside the period, so it counts as a fourth
+    # reduced daily rest (Art 8(4)); a weekly rest is a daily rest too and resets the count
+    s = DriverState(last_daily_rest_end=-840, reduced_daily_rests_used=3)
+    res = plan([Drive(60)], s, R, CAREFUL, clock)
+    assert [(b.kind, b.subtype, b.minutes) for b in res.blocks] == [
+        ("weekly_rest", "regular", 2700),
+        ("drive", None, 60),
+    ]
+    assert_legal(res, s, R, clock)
+
+
 def test_state_admitting_no_legal_plan_raises(clock: Clock) -> None:
     from legaleta.scheduler import SchedulingError
 
-    s = DriverState(last_daily_rest_end=-840, reduced_daily_rests_used=3)
+    # 900 min of compensation due 100 min after the start: no rest of 9 h + 900 min can end
+    # by then, whatever the plan does (Art 8(6b))
+    s = DriverState(compensation_owed_minutes=900, compensation_deadline=100)
     with pytest.raises(SchedulingError, match="no legal plan") as exc:
         plan([Drive(60)], s, R, CAREFUL, clock)
     assert str(exc.value).startswith("the driver state admits no legal plan: ")
-    assert "Art 8(4)" in str(exc.value)
+    assert "Art 8(6b)" in str(exc.value)
 
 
 def test_split_part_2_on_board_when_only_it_fits_the_window(clock: Clock) -> None:
@@ -337,3 +351,69 @@ def test_no_interrupted_split_part_2_on_board(clock: Clock) -> None:
     res = plan(route, s, R, Policy(), clock)
     assert not any(b.subtype == "split_part_2" and b.interruptions for b in res.blocks)
     assert_legal(res, s, R, clock)
+
+
+# ---------------------------------------------------------------- final review fixes
+
+
+@pytest.mark.parametrize("ferry_minutes", [300, 500])
+def test_no_interrupted_reduced_daily_rest_on_board(clock: Clock, ferry_minutes: int) -> None:
+    # C1 probe: the default policy used to plan a 9 h rest starting at the port, interrupted by
+    # boarding; Art 9(1) admits that only for a regular daily rest or a weekly rest
+    route = [
+        Drive(530),
+        Ferry("F", ferry_minutes, sleeper_cabin=True, boarding_minutes=30),
+        Drive(300),
+    ]
+    res = plan(route, DriverState(), R, EAGER, clock)
+    for b in res.blocks:
+        if b.interruptions:
+            assert b.kind == "weekly_rest" or b.subtype == "regular", b
+    assert not any(b.subtype == "reduced" and b.interruptions for b in res.blocks)
+    assert_legal(res, DriverState(), R, clock)
+
+
+def test_interrupted_regular_daily_rest_still_offered(clock: Clock) -> None:
+    # a regular rest that starts at the port and continues on board stays a legal option
+    route = [Drive(530), Ferry("F", 600, sleeper_cabin=True, boarding_minutes=30), Drive(300)]
+    res = plan(route, DriverState(), R, CAREFUL, clock)
+    rest = next(b for b in res.blocks if b.kind == "daily_rest")
+    assert (rest.subtype, rest.at, rest.interruptions, rest.minutes) == ("regular", "F", (30,), 690)
+    assert_legal(res, DriverState(), R, clock)
+
+
+@pytest.mark.parametrize("ended", [-1700, -1441, -1440, -1200, -901])
+@pytest.mark.parametrize("policy", [CAREFUL, EAGER])
+def test_period_ending_too_soon_opens_with_a_rest(clock: Clock, ended: int, policy: Policy) -> None:
+    # I1: 15 to 24 h after the last rest (and beyond) the plan opens with a daily rest
+    s = DriverState(last_daily_rest_end=ended, driving_today=300)
+    res = plan([Drive(300)], s, R, policy, clock)
+    assert res.blocks[0].kind == "daily_rest" and res.blocks[0].start == 0
+    assert "DAILY_REST_OVERDUE_AT_START" in {w.code for w in res.warnings}
+    assert_legal(res, s, R, clock)
+
+
+def test_no_overdue_warning_when_a_rest_still_fits(clock: Clock) -> None:
+    res = plan([Drive(60)], DriverState(last_daily_rest_end=-900), R, CAREFUL, clock)
+    assert "DAILY_REST_OVERDUE_AT_START" not in {w.code for w in res.warnings}
+
+
+def test_compensation_paid_by_its_deadline(clock: Clock) -> None:
+    # I4: 900 min owed, due at t=2000; the weekly rest is days away, so the debt rides on a
+    # daily rest that must end by 2000 (Art 8(6b)), and driving is capped to make room for it
+    s = DriverState(compensation_owed_minutes=900, compensation_deadline=2000)
+    res = plan([Drive(1500)], s, R, EAGER, clock)
+    payer = next(b for b in res.blocks if b.compensation_minutes)
+    assert payer.compensation_minutes == 900 and payer.end <= 2000
+    assert res.end_state.compensation_owed_minutes == 0
+    assert any("compensation must be attached (Art 8(6b))" in b.reason for b in res.blocks)
+    assert_legal(res, s, R, clock)
+
+
+@pytest.mark.parametrize("deadline", [1600, 1700, 3000])
+def test_compensation_deadline_sweep(clock: Clock, deadline: int) -> None:
+    s = DriverState(compensation_owed_minutes=900, compensation_deadline=deadline)
+    for policy in (CAREFUL, EAGER, Policy(extend_rest_to=6 * 60)):
+        res = plan([Drive(600), Stop("X", 60), Drive(900)], s, R, policy, clock)
+        assert res.end_state.compensation_owed_minutes == 0
+        assert_legal(res, s, R, clock)

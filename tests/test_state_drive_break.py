@@ -92,8 +92,16 @@ def test_wait_counts_only_when_flagged(clock: Clock) -> None:
         clock,
     )
     assert s.driving_since_break == 0
+    # a ferry crossing counts as a break only when the block says so (the scheduler always does)
     s = replay(DriverState(), [Block("drive", 0, 100), Block("ferry", 100, 60)], R, clock)
-    assert s.driving_since_break == 0  # a ferry crossing is always free time
+    assert s.driving_since_break == 100
+    s = replay(
+        DriverState(),
+        [Block("drive", 0, 100), Block("ferry", 100, 60, counts_as_rest=True)],
+        R,
+        clock,
+    )
+    assert s.driving_since_break == 0
     s = replay(DriverState(), [Block("drive", 0, 100), Block("work", 100, 60)], R, clock)
     assert s.driving_since_break == 100
 
