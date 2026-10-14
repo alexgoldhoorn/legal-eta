@@ -154,6 +154,13 @@ def plan(
     items = merge_drives(list(route))
     ctx = _Ctx(items, rules, policy, clock)
     cur = _run(ctx, _Cursor(t=0, state=state), plain_chooser)
+    violations = validate(cur.blocks, state, rules, clock)
+    if violations:
+        # late, never illegal: a plan that does not validate is never returned
+        raise SchedulingError(
+            "the driver state admits no legal plan: "
+            + "\n".join(f"{v.article}: {v.message}" for v in violations)
+        )
     warnings = list(STANDING_WARNINGS) + list(cur.warnings.values())
     return PlanResult(cur.blocks, cur.stops, warnings, cur.state, cur.t, rules, policy)
 
@@ -191,6 +198,27 @@ def _emit(ctx: _Ctx, cur: _Cursor, block: Block) -> None:
     if block.minutes == 0:
         return
     block = replace(block, start=cur.t)
+    p = ctx.policy
+    wanted_regular = p.daily_rest_type == "regular" or (
+        p.daily_rest_type == "reduced_when_needed" and not cur.reduced_today
+    )
+    base = block.rest_minutes - block.compensation_minutes
+    inside = _inside_window(ctx, cur, block.start, block.minutes)
+    if (
+        block.kind == "daily_rest"
+        and block.subtype == "reduced"
+        and base >= ctx.rules.daily_rest_regular
+        and ctx.rules.daily_rest_reduced <= inside < ctx.rules.daily_rest_regular
+        and wanted_regular
+    ):
+        _warn(
+            cur,
+            "DAILY_REST_REDUCED_BY_WINDOW",
+            "A daily rest of 11 h or more started too late in its 24 h period: fewer than 11 h "
+            "of it fall inside the period, so it counts as a reduced daily rest although the "
+            "policy asked for regular ones.",
+            "Art 8(2)",
+        )
     cur.state = apply(cur.state, block, ctx.rules, ctx.clock)
     cur.t = block.end
     cur.blocks.append(block)
@@ -249,12 +277,16 @@ def _commit(ctx: _Ctx, cur: _Cursor, choice: Choice) -> None:
 # ---------------------------------------------------------------- driving
 
 
-def _shortest_daily_rest(ctx: _Ctx, cur: _Cursor, env: Envelope) -> int:
+def _shortest_daily_rest(ctx: _Ctx, cur: _Cursor, env: Envelope, honour_policy: bool = True) -> int:
+    """The shortest daily rest that will be emitted next (Art 8(2), Art 8(4)).
+
+    With honour_policy=False: the shortest the rules allow, whatever the policy prefers.
+    """
     r, p = ctx.rules, ctx.policy
     if "split_part_2" in env.allowed_daily_rests:
         return r.daily_rest_split_second
     if "reduced" in env.allowed_daily_rests and (
-        p.daily_rest_type == "reduced_eager" or cur.reduced_today
+        not honour_policy or p.daily_rest_type == "reduced_eager" or cur.reduced_today
     ):
         return r.daily_rest_reduced
     return r.daily_rest_regular
@@ -373,11 +405,25 @@ def _rest_block(
     total = base + comp + sum(interruptions)
     total = _extend_rest(ctx, cur, kind, start_t, total)
     text, article = _REST_TEXT[(kind, sub)]
+    inside = _inside_window(ctx, cur, start_t, total)
+    by_window = (
+        kind == "daily_rest"
+        and sub == "regular"
+        and ctx.rules.daily_rest_reduced <= inside < ctx.rules.daily_rest_regular
+    )
+    if by_window:
+        # Art 8(2): apply() counts it as reduced; the label says so too (minutes unchanged)
+        sub, text, article = "reduced", "daily rest", "Art 8(2); Art 8(4)"
     reason = text + (place or (" at the roadside" if at is None else f" at {at}"))
     if sub == "reduced" and kind == "daily_rest":
         used = cur.state.reduced_daily_rests_used + 1
         allowed = ctx.rules.reduced_daily_rests_between_weekly
         reason += f" ({used} of {allowed} between weekly rests)"
+    if by_window:
+        reason += (
+            f"; only {inside} min of this rest fall inside the 24 h period, "
+            "so it counts as reduced (Art 8(2))"
+        )
     if comp:
         reason += f", plus {comp} min compensation for an earlier reduced weekly rest (Art 8(6b))"
     if interruptions:
@@ -394,6 +440,12 @@ def _rest_block(
         interruptions=interruptions,
         compensation_minutes=comp,
     )
+
+
+def _inside_window(ctx: _Ctx, cur: _Cursor, start_t: int, minutes: int) -> int:
+    """Minutes of a rest starting at start_t that fall inside the current 24 h period."""
+    window_end = cur.state.last_daily_rest_end + ctx.rules.daily_window
+    return min(start_t + minutes, window_end) - start_t
 
 
 def _break_block(ctx: _Ctx, minutes: int, at: str | None, reason: str) -> Block:
@@ -770,7 +822,7 @@ def _ferry_choices(ctx: _Ctx, cur: _Cursor, ferry: Ferry) -> list[Choice]:
         article="Art 7; Art 9(2)",
     )
     out = [Choice("continue", (*boarding, crossing), "ferry")]
-    if not ferry.sleeper_cabin or ferry.boarding_minutes > r.ferry_interruption_total:
+    if not ferry.sleeper_cabin:
         return _legal_or_rest_first(ctx, cur, out, None, (), (*boarding, crossing))
     for kind, subs in (
         ("daily_rest", env.allowed_daily_rests),
@@ -792,6 +844,8 @@ def _ferry_choices(ctx: _Ctx, cur: _Cursor, ferry: Ferry) -> list[Choice]:
             if ferry.minutes >= probe.minutes:
                 rest = replace(probe, minutes=ferry.minutes)
                 blocks: tuple[Block, ...] = (*boarding, rest)
+            elif ferry.boarding_minutes > r.ferry_interruption_total:
+                continue  # Art 9(1) limits only a rest interrupted by boarding
             else:
                 interruptions = (ferry.boarding_minutes,) if ferry.boarding_minutes else ()
                 rest = _rest_block(
@@ -821,18 +875,6 @@ def _ferry_choices(ctx: _Ctx, cur: _Cursor, ferry: Ferry) -> list[Choice]:
 # ---------------------------------------------------------------- legality at stops and ferries
 
 
-def _min_daily_rest(ctx: _Ctx, env: Envelope, honour_policy: bool) -> int:
-    """The shortest daily rest the rules (and the policy) allow next (Art 8(2), Art 8(4))."""
-    r = ctx.rules
-    if "split_part_2" in env.allowed_daily_rests:
-        return r.daily_rest_split_second
-    if "reduced" in env.allowed_daily_rests and not (
-        honour_policy and ctx.policy.daily_rest_type == "regular"
-    ):
-        return r.daily_rest_reduced
-    return r.daily_rest_regular
-
-
 def _legal(ctx: _Ctx, cur: _Cursor, choice: Choice, honour_policy: bool = True) -> bool:
     """The choice validates clean, and a daily and a weekly rest can still start in time after it.
 
@@ -847,7 +889,7 @@ def _legal(ctx: _Ctx, cur: _Cursor, choice: Choice, honour_policy: bool = True) 
     if cur.idx + 1 >= len(ctx.route):
         return True  # the plan ends here; nothing after it is checked
     env = envelope(sim.state, ctx.rules, sim.t)
-    min_rest = _min_daily_rest(ctx, env, honour_policy)
+    min_rest = _shortest_daily_rest(ctx, sim, env, honour_policy)
     return env.daily_window_ends_in >= min_rest and env.weekly_rest_due_in >= 0
 
 

@@ -245,3 +245,64 @@ def test_crossing_too_long_for_any_rest_raises(clock: Clock) -> None:
 
     with pytest.raises(SchedulingError, match="ferry"):
         plan([Drive(60), Ferry("f1", minutes=1000), Drive(60)], DriverState(), R, CAREFUL, clock)
+
+
+def test_rest_after_boarding_when_boarding_exceeds_the_art9_limit(clock: Clock) -> None:
+    # Art 9(1)'s 60 min binds only a rest interrupted by boarding; one that starts after it is fine
+    route = [Drive(60), Ferry("f1", 1000, sleeper_cabin=True, boarding_minutes=90), Drive(60)]
+    res = plan(route, DriverState(), R, CAREFUL, clock)
+    assert kinds(res) == [("drive", 60), ("work", 90), ("daily_rest", 1000), ("drive", 60)]
+    assert res.blocks[2].at == "f1" and res.blocks[2].interruptions == ()
+    assert_legal(res, DriverState(), R, clock)
+
+
+# A daily rest with 9 h to under 11 h inside its 24 h period counts as reduced (Art 8(2)):
+# the label says so, the minutes are unchanged, and a regular-rest policy gets a warning.
+
+
+def test_relaxed_pass_after_a_crossing_labels_the_rest_reduced(clock: Clock) -> None:
+    res = plan([Drive(60), Ferry("f1", 781), Drive(60)], DriverState(), R, CAREFUL, clock)
+    rest = [b for b in res.blocks if b.kind == "daily_rest"]
+    assert [(b.subtype, b.minutes) for b in rest] == [("reduced", 660)]
+    assert "599 min" in rest[0].reason and "Art 8(2)" in rest[0].article
+    assert res.end_state.reduced_daily_rests_used == 1
+    assert "DAILY_REST_REDUCED_BY_WINDOW" in {w.code for w in res.warnings}
+    assert_legal(res, DriverState(), R, clock)
+
+
+def test_rest_after_service_under_when_needed_is_labelled_reduced(clock: Clock) -> None:
+    s = DriverState(last_daily_rest_end=-600)  # window ends at 840
+    when_needed = Policy(daily_rest_type="reduced_when_needed")
+    res = plan([Drive(180), Stop("A", service_minutes=60), Drive(60)], s, R, when_needed, clock)
+    rest = [b for b in res.blocks if b.kind == "daily_rest"]
+    assert [(b.subtype, b.minutes, b.at) for b in rest] == [("reduced", 660, "A")]
+    assert res.end_state.reduced_daily_rests_used == 1
+    assert "DAILY_REST_REDUCED_BY_WINDOW" in {w.code for w in res.warnings}
+    assert_legal(res, s, R, clock)
+
+
+def test_opening_rest_late_in_its_period_is_labelled_reduced(clock: Clock) -> None:
+    s = DriverState(last_daily_rest_end=-840)  # only 600 min of the period left
+    res = plan([Drive(60)], s, R, CAREFUL, clock)
+    assert [(b.kind, b.subtype, b.minutes) for b in res.blocks] == [
+        ("daily_rest", "reduced", 660),
+        ("drive", None, 60),
+    ]
+    assert res.end_state.reduced_daily_rests_used == 1
+    assert "DAILY_REST_REDUCED_BY_WINDOW" in {w.code for w in res.warnings}
+    assert_legal(res, s, R, clock)
+
+
+def test_reduced_rest_under_eager_policy_does_not_warn(clock: Clock) -> None:
+    res = plan([Drive(700)], DriverState(), R, EAGER, clock)
+    assert "DAILY_REST_REDUCED_BY_WINDOW" not in {w.code for w in res.warnings}
+
+
+def test_state_admitting_no_legal_plan_raises(clock: Clock) -> None:
+    from legaleta.scheduler import SchedulingError
+
+    s = DriverState(last_daily_rest_end=-840, reduced_daily_rests_used=3)
+    with pytest.raises(SchedulingError, match="no legal plan") as exc:
+        plan([Drive(60)], s, R, CAREFUL, clock)
+    assert str(exc.value).startswith("the driver state admits no legal plan: ")
+    assert "Art 8(4)" in str(exc.value)
