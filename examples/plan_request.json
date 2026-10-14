@@ -1,0 +1,59 @@
+{
+  "start": "2026-10-20T06:00:00+02:00",
+  "week_timezone": "Europe/Madrid",
+  "route": [
+    {
+      "kind": "stop",
+      "id": "depot",
+      "service_minutes": 30,
+      "driver_works": true,
+      "tags": [
+        "depot"
+      ]
+    },
+    {
+      "kind": "drive",
+      "minutes": 310
+    },
+    {
+      "kind": "stop",
+      "id": "A",
+      "service_minutes": 45,
+      "driver_works": false,
+      "window": {
+        "earliest": "2026-10-20T11:00:00+02:00",
+        "latest": "2026-10-20T13:00:00+02:00"
+      },
+      "rest_allowed": false
+    },
+    {
+      "kind": "ferry",
+      "id": "f1",
+      "minutes": 540,
+      "sleeper_cabin": true,
+      "boarding_minutes": 20
+    },
+    {
+      "kind": "drive",
+      "minutes": 400
+    },
+    {
+      "kind": "stop",
+      "id": "B",
+      "service_minutes": 60,
+      "driver_works": true
+    }
+  ],
+  "rules": {
+    "preset": "eu561",
+    "overrides": {
+      "break_after_driving": 240
+    }
+  },
+  "policy": {
+    "preset": "driver_friendly",
+    "overrides": {
+      "split_breaks": "never"
+    }
+  }
+}

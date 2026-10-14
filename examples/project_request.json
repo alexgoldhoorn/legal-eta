@@ -1,0 +1,10 @@
+{
+  "start": "2026-10-19T06:00:00+02:00",
+  "driver": {
+    "raw": {
+      "driving_since_break": 200
+    }
+  },
+  "activity": "driving",
+  "minutes": 120
+}

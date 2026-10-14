@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import UTC, datetime, timedelta, tzinfo
 
 
 def parse_hhmm(text: str) -> int:
@@ -21,7 +20,7 @@ def parse_hhmm(text: str) -> int:
 @dataclass(frozen=True)
 class Clock:
     start: datetime
-    week_tz: ZoneInfo
+    week_tz: tzinfo
 
     def __post_init__(self) -> None:
         if self.start.tzinfo is None or self.start.utcoffset() is None:
