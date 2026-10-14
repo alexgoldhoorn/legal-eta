@@ -181,17 +181,27 @@ def lookahead_chooser(ctx: _Ctx, cur: _Cursor, choices: list[Choice]) -> Choice:
     """Score each choice by simulating the next policy.lookahead_stops stops (spec 5.2).
 
     Stage 1 scores the choices that are not needed_only; stage 2 (all choices) runs only
-    when stage 1's best is late in the horizon, and wins only with a strictly lower score.
+    when stage 1's best is late in the horizon (beyond the lateness at the stop being
+    decided), and wins only with a strictly lower score and strictly less lateness.
     """
     if len(choices) == 1:
         return choices[0]
     stage1 = [c for c in choices if not c.needed_only] or choices
     best = _best(ctx, cur, stage1)
-    if best.lateness > 0 and len(stage1) < len(choices):
+    if best.lateness > _unavoidable_lateness(ctx, cur) and len(stage1) < len(choices):
         best2 = _best(ctx, cur, choices)
-        if best2.score < best.score:
+        # a needed_only choice wins only by being less late, never on arrival time alone
+        if best2.score < best.score and best2.lateness < best.lateness:
             best = best2
     return best.choice
+
+
+def _unavoidable_lateness(ctx: _Ctx, cur: _Cursor) -> int:
+    """Lateness at the stop being decided: the driver is already there, no choice changes it."""
+    item = ctx.route[cur.idx] if cur.idx < len(ctx.route) else None
+    if isinstance(item, Stop) and item.latest is not None:
+        return max(0, cur.t - item.latest)
+    return 0
 
 
 # ---------------------------------------------------------------- public entry point
@@ -591,7 +601,14 @@ def _road_choices(ctx: _Ctx, cur: _Cursor) -> list[Choice]:
         not cur.extend_today
         and p.extended_driving == "when_needed"
         and env.extension_available
-        and env.drive_today_unextended <= 0 < env.drive_today
+        and env.drive_today_unextended < env.drive_today
+        and env.drive_today > 0
+        and (
+            env.drive_today_unextended <= 0
+            # the break binds and the 9 h cap would bind before the next break is due:
+            # the extension is decided now, taken with this break
+            or (bundled and env.drive_today_unextended < r.break_after_driving)
+        )
     ):
         out.append(Choice("extend_day", bundled, "road", needed_only=True, sets_extend=True))
     if (

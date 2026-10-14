@@ -114,3 +114,21 @@ def test_lookahead_runs_in_milliseconds(clock: Clock) -> None:
     res = plan(route, DriverState(), R, POLICIES["driver_friendly"], clock)
     assert time.perf_counter() - t0 < 2.0
     assert_legal(res, DriverState(), R, clock)
+
+
+def test_extension_offered_when_the_break_binds_before_the_daily_cap(clock: Clock) -> None:
+    # at t=555 the break binds with 30 min left before the 9 h cap; only an extension
+    # (taken with that break) reaches B in its window: B at 690
+    route = [
+        Drive(240),
+        Stop("A", service_minutes=45, driver_works=False),
+        Drive(360),
+        Stop("B", service_minutes=10, driver_works=True, latest=760),
+    ]
+    res = plan(route, DriverState(), R, POLICIES["driver_friendly"], clock)
+    assert res.stops[1].lateness_minutes == 0
+    assert not any(b.kind == "daily_rest" for b in res.blocks)
+    assert_legal(res, DriverState(), R, clock)
+    fast = plan(route, DriverState(), R, POLICIES["fastest"], clock)
+    assert fast.stops[1].arrival == 690
+    assert_legal(fast, DriverState(), R, clock)
