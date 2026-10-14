@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
 from legaleta.clock import Clock
@@ -218,3 +219,148 @@ def replay(state: DriverState, blocks: list[Block], rules: RuleSet, clock: Clock
     for b in blocks:
         state = apply(state, b, rules, clock)
     return state
+
+
+REMAINING_KEYS = (
+    "remaining_drive_before_break",
+    "remaining_drive_today",
+    "remaining_drive_this_week",
+    "remaining_drive_fortnight",
+    "daily_rest_due_in",
+    "weekly_rest_due_in",
+)
+
+
+def to_remaining(state: DriverState, rules: RuleSet, now: int) -> dict[str, int | bool]:
+    e = envelope(state, rules, now)
+    out: dict[str, int | bool] = {
+        "remaining_drive_before_break": e.drive_before_break,
+        "remaining_drive_today": e.drive_today_unextended,
+        "remaining_drive_this_week": e.drive_this_week,
+        "remaining_drive_fortnight": e.drive_fortnight,
+        "daily_rest_due_in": e.daily_window_ends_in,
+        "weekly_rest_due_in": e.weekly_rest_due_in,
+        "split_break_first_part_taken": state.split_break_first_part_taken,
+        "split_daily_rest_first_part_taken": state.split_daily_rest_first_part_taken,
+        "reduced_daily_rests_used": state.reduced_daily_rests_used,
+        "extended_days_used_this_week": state.extended_days_used_this_week,
+        "last_weekly_rest_reduced": state.last_weekly_rest_reduced,
+        "compensation_owed_minutes": state.compensation_owed_minutes,
+    }
+    if state.compensation_deadline is not None:
+        out["compensation_deadline_in"] = state.compensation_deadline - now
+    return out
+
+
+def from_remaining(
+    remaining: Mapping[str, object], rules: RuleSet, now: int = 0
+) -> tuple[DriverState, list[str]]:
+    """Convert the tachograph-style 'remaining' form. Returns the state and the assumptions made."""
+    missing = [k for k in REMAINING_KEYS if k not in remaining]
+    if missing:
+        raise ValueError(f"remaining form is missing {', '.join(missing)}")
+
+    def _int(key: str, default: int = 0) -> int:
+        v = remaining.get(key, default)
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise ValueError(f"{key} must be an integer number of minutes")
+        return v
+
+    def _bool(key: str) -> bool:
+        v = remaining.get(key, False)
+        if not isinstance(v, bool):
+            raise ValueError(f"{key} must be a boolean")
+        return v
+
+    notes: list[str] = []
+    rem_today = _int("remaining_drive_today")
+    # always read against the 9 h cap, so negative on an extended day
+    driving_today = rules.daily_driving - rem_today
+    if rem_today < 0:
+        notes.append(
+            "remaining_drive_today is negative: the day is already extended beyond the 9 h cap"
+        )
+    else:
+        notes.append(
+            "remaining_drive_today read against the 9 h cap; "
+            "if the day is already extended to 10 h, pass the raw form"
+        )
+    driving_this_week = rules.weekly_driving - _int("remaining_drive_this_week")
+    driving_last_week = max(
+        0, rules.fortnight_driving - _int("remaining_drive_fortnight") - driving_this_week
+    )
+    owed = _int("compensation_owed_minutes")
+    deadline = (
+        now + _int("compensation_deadline_in") if "compensation_deadline_in" in remaining else None
+    )
+    if owed > 0 and deadline is None:
+        notes.append("compensation owed without a deadline: treated as due at the end of the plan")
+    state = DriverState(
+        driving_since_break=rules.break_after_driving - _int("remaining_drive_before_break"),
+        split_break_first_part_taken=_bool("split_break_first_part_taken"),
+        driving_today=driving_today,
+        last_daily_rest_end=now - (rules.daily_window - _int("daily_rest_due_in")),
+        split_daily_rest_first_part_taken=_bool("split_daily_rest_first_part_taken"),
+        reduced_daily_rests_used=_int("reduced_daily_rests_used"),
+        driving_this_week=driving_this_week,
+        driving_last_week=driving_last_week,
+        extended_days_used_this_week=_int("extended_days_used_this_week"),
+        last_weekly_rest_end=now - (rules.weekly_rest_deadline - _int("weekly_rest_due_in")),
+        last_weekly_rest_reduced=_bool("last_weekly_rest_reduced"),
+        compensation_owed_minutes=owed,
+        compensation_deadline=deadline,
+    )
+    return state, notes
+
+
+@dataclass(frozen=True)
+class ProjectResult:
+    state: DriverState
+    envelope: Envelope
+    first_limit: tuple[int, str] | None  # (minutes from now, limit name) or None
+
+
+ACTIVITIES = ("driving", "resting", "other_work")
+
+
+def project(
+    state: DriverState,
+    minutes: int,
+    activity: str,
+    rules: RuleSet,
+    clock: Clock,
+    now: int = 0,
+) -> ProjectResult:
+    """Simulate a constant activity for `minutes` and report the first limit hit."""
+    if activity not in ACTIVITIES:
+        raise ValueError(f"activity must be one of {ACTIVITIES}")
+    if minutes < 0:
+        raise ValueError("minutes must be >= 0")
+    e0 = envelope(state, rules, now)
+    first: tuple[int, str] | None = None
+    if activity == "driving":
+        limits = [
+            (e0.drive_before_break, "break"),
+            (e0.drive_today, "daily_driving"),
+            (e0.drive_this_week, "weekly_driving"),
+            (e0.drive_fortnight, "fortnight_driving"),
+            (e0.daily_window_ends_in - rules.daily_rest_reduced, "daily_rest_window"),
+            (e0.weekly_rest_due_in, "weekly_rest_deadline"),
+        ]
+        block = Block("drive", now, minutes)
+    elif activity == "other_work":
+        limits = [
+            (e0.daily_window_ends_in, "daily_rest_window"),
+            (e0.weekly_rest_due_in, "weekly_rest_deadline"),
+        ]
+        block = Block("work", now, minutes)
+    else:
+        limits = []
+        kind = "weekly_rest" if minutes >= rules.weekly_rest_reduced else "daily_rest"
+        regular = rules.weekly_rest_regular if kind == "weekly_rest" else rules.daily_rest_regular
+        block = Block(kind, now, minutes, subtype="regular" if minutes >= regular else "reduced")
+    hits = sorted((max(0, m), name) for m, name in limits if m < minutes)
+    if hits:
+        first = hits[0]
+    new_state = apply(state, block, rules, clock)
+    return ProjectResult(new_state, envelope(new_state, rules, now + minutes), first)
