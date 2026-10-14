@@ -143,6 +143,6 @@ def check_contiguous(blocks: list[Block], start: int = 0) -> None:
         if b.start != t:
             what = "gap" if b.start > t else "overlap"
             raise ValueError(
-                f"block {i} does not start at {t} ({what}); blocks must start at {start}, contiguous"
+                f"block {i} does not start at {t} ({what}); blocks start at {start}, contiguous"
             )
         t = b.end
