@@ -8,7 +8,7 @@ from legaleta.policy import Policy, policy_from
 from legaleta.rules import PRESETS
 from legaleta.scheduler import plan
 from legaleta.state import DriverState
-from legaleta.timeline import Drive, Stop
+from legaleta.timeline import Drive, Ferry, Stop
 from tests.conftest import assert_legal
 
 R = PRESETS["eu561"]
@@ -144,7 +144,7 @@ def test_tagged_only_falls_back_with_warning(clock: Clock) -> None:
 # break; E is reached at 16:00 but its window opens at 19:00 (t=780); the 60 min after E need a
 # daily rest first. Reduced rests are allowed: a regular rest starting at 19:15 would have only
 # 645 min inside the 24 h period, a window-reduced rest that daily_rest_type "regular" forbids.
-# A midday rest arrives at the end earlier than waiting at E, serving it, and resting on
+# Resting at D (11:45) arrives at the end earlier than waiting at E, serving it, and resting on
 # leaving (19:15, roadside, 540 min reduced). A rest at E itself would start at 16:00 (it covers
 # the wait) and is outside an evening window.
 WINDOW_ROUTE = [
@@ -173,13 +173,12 @@ def test_rest_window_soft_moves_the_rest(clock: Clock) -> None:
     )
     assert_legal(res, DriverState(), R, clock)
     midday = policy_from(
-        "fastest", {**WINDOW_BASE, "rest_start_window": {"earliest": "10:00", "latest": "12:00"}}
+        "fastest", {**WINDOW_BASE, "rest_start_window": {"earliest": "11:00", "latest": "12:00"}}
     )
     res2 = plan(WINDOW_ROUTE, DriverState(), R, midday, clock)
     rest2 = [b for b in res2.blocks if b.kind == "daily_rest"][0]
-    # with 9 h rests the earliest midday rest (roadside at 10:30, after the first 4.5 h) beats
-    # resting at D (11:45): both start inside the window, and only the first needs no break later
-    assert 10 * 60 <= clock.minute_of_day(rest2.start) <= 12 * 60 and res2.arrival < res.arrival
+    # D is reached at 11:45, inside the window: the rest is pulled there
+    assert rest2.at == "D" and res2.arrival < res.arrival
     assert_legal(res2, DriverState(), R, clock)
     # the rest-type knob outranks a soft start window: under "regular" the rest is taken at E
     regular = policy_from(
@@ -275,3 +274,60 @@ def test_weekly_regular_only(clock: Clock) -> None:
     weekly = [b for b in res.blocks if b.kind == "weekly_rest"]
     assert weekly and weekly[0].subtype == "regular"
     assert_legal(res, s, R, clock)
+
+
+# --- review fixes: ferries, extension labels, knob combinations
+HARD_EVENING = {"rest_start_window": {"earliest": "20:00", "latest": "22:00", "hard": True}}
+
+
+def test_hard_window_at_sleeper_ferry_falls_back_with_warning(clock: Clock) -> None:
+    # only daily rests on board unblock, and the hard window drops them all
+    s = DriverState(last_daily_rest_end=-300, last_weekly_rest_reduced=True)
+    route = [Drive(500), Ferry("F", 360, sleeper_cabin=True, boarding_minutes=30), Drive(100)]
+    res = plan(route, s, R, policy_from("fastest", HARD_EVENING), clock)
+    assert "PREFERENCE_UNMET:rest_start_window" in codes(res)
+    assert any(b.kind == "daily_rest" and b.at == "F" for b in res.blocks)
+    assert_legal(res, s, R, clock)
+
+
+def test_hard_window_at_ferry_never_forces_a_weekly_rest(clock: Clock) -> None:
+    route = [Drive(500), Ferry("F", 600, sleeper_cabin=True, boarding_minutes=30), Drive(100)]
+    res = plan(route, DriverState(), R, policy_from("fastest", HARD_EVENING), clock)
+    assert "PREFERENCE_UNMET:rest_start_window" in codes(res)
+    assert not any(b.kind == "weekly_rest" for b in res.blocks)
+    assert any(b.kind == "daily_rest" and b.at == "F" for b in res.blocks)
+    assert_legal(res, DriverState(), R, clock)
+
+
+def test_ferry_rest_keeps_the_crossing_length_under_extend_rest_to(clock: Clock) -> None:
+    route = [Drive(500), Ferry("F", 600, sleeper_cabin=True, boarding_minutes=30), Drive(100)]
+    res = plan(route, DriverState(), R, policy_from("fastest", {"extend_rest_to": "06:00"}), clock)
+    rest = [b for b in res.blocks if b.kind == "daily_rest" and b.at == "F"][0]
+    assert rest.minutes == 600
+    assert_legal(res, DriverState(), R, clock)
+
+
+def test_extended_reduced_rest_is_labelled_regular(clock: Clock) -> None:
+    # a 9 h rest from 15:45 ends 00:45 and is extended to 06:00: 795 min, all inside the period
+    p = policy_from("fastest", {"extend_rest_to": "06:00", "extended_driving": "never"})
+    res = plan([Drive(540), Drive(60)], DriverState(), R, p, clock)
+    rest = [b for b in res.blocks if b.kind == "daily_rest"][0]
+    assert rest.minutes >= 660 and rest.subtype == "regular"
+    assert "of 3 between weekly rests" not in rest.reason
+    assert res.end_state.reduced_daily_rests_used == 0
+    assert_legal(res, DriverState(), R, clock)
+
+
+def test_earliest_convenient_with_split_prefer_takes_15_at_a(clock: Clock) -> None:
+    route = [
+        Drive(200),
+        Stop("A", service_minutes=20, driver_works=True),
+        Drive(50),
+        Stop("B", service_minutes=40, driver_works=False),
+        Drive(100),
+    ]
+    p = Policy(break_timing="earliest_convenient", split_breaks="prefer")
+    res = plan(route, DriverState(), R, p, clock)
+    first = [b for b in res.blocks if b.kind == "break"][0]
+    assert (first.at, first.minutes) == ("A", 15)
+    assert_legal(res, DriverState(), R, clock)

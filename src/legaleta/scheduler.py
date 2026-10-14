@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
@@ -154,6 +155,15 @@ def _break_minutes(choice: Choice) -> int:
     return sum(b.minutes for b in choice.blocks if b.kind == "break")
 
 
+def _rest_still_needed(ctx: _Ctx, cur: _Cursor) -> bool:
+    """The driving left on the route exceeds what today still allows (Art 6(1), Art 8(2))."""
+    # called at a stop, so no drive is under way (drive_left == 0)
+    left = sum(it.minutes for it in ctx.route[cur.idx :] if isinstance(it, Drive))
+    caps = _caps(ctx, cur, envelope(cur.state, ctx.rules, cur.t))
+    today = min(caps[1][0], caps[4][0])
+    return left > today
+
+
 def plain_chooser(ctx: _Ctx, cur: _Cursor, choices: list[Choice]) -> Choice:
     """Latest-legal: continue when possible, else the smallest block that unblocks.
 
@@ -163,6 +173,23 @@ def plain_chooser(ctx: _Ctx, cur: _Cursor, choices: list[Choice]) -> Choice:
     """
     primary = [c for c in choices if not c.needed_only] or choices
     cont = next((c for c in primary if c.name == "continue"), None)
+    if (
+        cont is not None
+        and ctx.policy.rest_start_window is not None
+        and _rest_still_needed(ctx, cur)
+    ):
+        # a rest at this stop that breaks no preference (inside the window, at an acceptable
+        # place) is taken ahead of continuing, when the day cannot end without one anyway
+        in_window = [
+            c
+            for c in primary
+            if c.name.startswith("daily_rest_")
+            and c.name.endswith("_here")
+            and "split_part_1" not in c.name
+            and c.penalty == 0
+        ]
+        if in_window:
+            return min(in_window, key=lambda c: _RANK.get(_base_name(c.name), 99))
     if cont is not None:
         nearly_free = [
             c
@@ -293,7 +320,7 @@ def _emit(ctx: _Ctx, cur: _Cursor, block: Block) -> None:
     if block.minutes == 0:
         return
     block = replace(block, start=cur.t)
-    if block.kind in REST_KINDS:
+    if block.kind in REST_KINDS and not _on_ferry(ctx, block):
         stretched = _extend_rest(ctx, cur, block.kind, block.start, block.minutes)
         if stretched > block.minutes:
             extra = stretched - block.minutes
@@ -303,6 +330,7 @@ def _emit(ctx: _Ctx, cur: _Cursor, block: Block) -> None:
                 minutes=stretched,
                 reason=block.reason + f", extended by {extra} min (policy extend_rest_to)",
             )
+    block = _relabel_daily_rest(ctx, cur, block)
     p = ctx.policy
     wanted_regular = p.daily_rest_type == "regular" or (
         p.daily_rest_type == "reduced_when_needed" and not cur.reduced_today
@@ -348,6 +376,48 @@ def _emit(ctx: _Ctx, cur: _Cursor, block: Block) -> None:
             "vehicle: the driver needs accommodation there.",
             "Art 8(8)",
         )
+
+
+def _on_ferry(ctx: _Ctx, block: Block) -> bool:
+    """A rest taken on board lasts as long as the crossing; it is never extended."""
+    return block.at is not None and any(
+        isinstance(it, Ferry) and it.id == block.at for it in ctx.route
+    )
+
+
+_COUNT_TEXT = re.compile(r" \(\d+ of \d+ between weekly rests\)")
+_WINDOW_TEXT = re.compile(
+    r"; only \d+ min of this rest fall inside the 24 h period, [^;]*?\(Art 8\(2\)\)"
+)
+
+
+def _relabel_daily_rest(ctx: _Ctx, cur: _Cursor, block: Block) -> Block:
+    """Label a stretched or extended daily rest as apply() will count it (Art 8(2), Art 8(4))."""
+    r = ctx.rules
+    if block.kind != "daily_rest" or block.subtype not in ("regular", "reduced"):
+        return block
+    base = block.rest_minutes - block.compensation_minutes
+    if base < r.daily_rest_reduced:
+        return block
+    inside = _inside_window(ctx, cur, block.start, block.minutes)
+    classified = min(base, inside) if inside >= r.daily_rest_reduced else base
+    sub = "reduced" if classified < r.daily_rest_regular else "regular"
+    if sub == block.subtype:
+        return block
+    reason = _WINDOW_TEXT.sub("", _COUNT_TEXT.sub("", block.reason))
+    for head in ("regular daily rest of 11 h", "reduced daily rest of 9 h"):
+        reason = reason.replace(head, "daily rest", 1)
+    if sub == "regular":
+        reason += f"; {classified} min, so it counts as a regular daily rest (Art 8(2))"
+        article = block.article.replace("Art 8(2); Art 8(4)", "Art 8(2); Art 4(g)")
+    else:
+        used = cur.state.reduced_daily_rests_used + 1
+        reason += (
+            f" ({used} of {r.reduced_daily_rests_between_weekly} between weekly rests); "
+            f"only {classified} min count, so it is a reduced daily rest (Art 8(2))"
+        )
+        article = block.article.replace("Art 8(2); Art 4(g)", "Art 8(2); Art 8(4)")
+    return replace(block, subtype=sub, reason=reason, article=article)
 
 
 def _apply_choice(ctx: _Ctx, cur: _Cursor, choice: Choice) -> None:
@@ -580,10 +650,15 @@ def _rest_blocks_with_start(choice: Choice, cur: _Cursor) -> list[tuple[Block, i
 def _apply_preferences(ctx: _Ctx, cur: _Cursor, choices: list[Choice]) -> list[Choice]:
     """policy.rest_places and policy.rest_start_window: drop (hard) or penalise (soft) rests.
 
-    On the road, a knob that would remove every choice is dropped instead and warned about.
+    On the road and at a ferry, a knob that would remove every choice, or every daily rest
+    and leave only weekly rests, is dropped instead and warned about.
     """
     p = ctx.policy
-    on_road = bool(choices) and choices[0].where == "road"
+    # at a stop "continue" always survives; on the road and at a ferry nothing does
+    restorable = bool(choices) and choices[0].where in ("road", "ferry")
+
+    def is_daily_rest(c: Choice) -> bool:
+        return any(b.kind == "daily_rest" for b in c.blocks)
 
     def pass_(knob: str, cs: list[Choice]) -> list[Choice]:
         kept: list[Choice] = []
@@ -612,7 +687,13 @@ def _apply_preferences(ctx: _Ctx, cur: _Cursor, choices: list[Choice]) -> list[C
                         penalty += p.rest_start_window.weight * 60.0
             if not drop:
                 kept.append(replace(c, penalty=c.penalty + penalty) if penalty else c)
-        if on_road and not kept:
+        # every choice dropped, or only weekly rests left where daily rests were offered
+        only_weekly_left = (
+            any(is_daily_rest(c) for c in cs)
+            and not any(is_daily_rest(c) for c in kept)
+            and all(any(b.kind in REST_KINDS for b in c.blocks) for c in kept)
+        )
+        if restorable and (not kept or only_weekly_left):
             _warn(
                 cur,
                 f"PREFERENCE_UNMET:{knob}",
@@ -864,8 +945,9 @@ def _extra_stop_break_choices(
         or (p.break_timing == "balanced" and idle >= r.break_full - _NEARLY_FREE_MINUTES)
     ):
         extra.append(_break_at_stop(ctx, cur, stop, r.break_full, "break_45_here", wait, service))
-        # a 15 min first part does not take the break either
-        for name in ("continue", "break_15_here"):
+        # a 15 min first part does not take the break either, unless split breaks are preferred
+        names = ("continue",) if p.split_breaks == "prefer" else ("continue", "break_15_here")
+        for name in names:
             penalties[name] = penalties.get(name, 0.0) + PREFERENCE_WEIGHTS["break_timing"]
     if (
         p.split_breaks == "prefer"
@@ -935,7 +1017,7 @@ def _stop_choices(ctx: _Ctx, cur: _Cursor, stop: Stop) -> list[Choice]:
     next_drive = _next_drive_minutes(ctx, cur.idx)
     if next_drive == 0:
         return _legal_or_rest_first(
-            ctx, cur, out, stop.id, (wait,) if wait_minutes else (), service
+            ctx, cur, out, "stop", stop.id, (wait,) if wait_minutes else (), service
         )
     idle = (wait_minutes if wait_counts else 0) + (stop.service_minutes if stop.idle_counts else 0)
     due_soon = env.drive_before_break - next_drive <= p.break_at_stop_lookahead_minutes
@@ -985,7 +1067,7 @@ def _stop_choices(ctx: _Ctx, cur: _Cursor, stop: Stop) -> list[Choice]:
             env.daily_window_ends_in - _shortest_daily_rest(ctx, cur, env) - next_drive
             <= p.rest_place_lookahead_minutes
         )
-        if rest_due_soon or p.rest_places != "anywhere":
+        if rest_due_soon or p.rest_places != "anywhere" or p.rest_start_window is not None:
             for sub in env.allowed_daily_rests:
                 if _policy_allows(ctx, env, "daily_rest", sub):
                     out.append(_rest_at_stop(ctx, cur, stop, "daily_rest", sub, wait, service))
@@ -994,7 +1076,9 @@ def _stop_choices(ctx: _Ctx, cur: _Cursor, stop: Stop) -> list[Choice]:
                 if _policy_allows(ctx, env, "weekly_rest", sub):
                     out.append(_rest_at_stop(ctx, cur, stop, "weekly_rest", sub, wait, service))
     out = _apply_preferences(ctx, cur, out)
-    return _legal_or_rest_first(ctx, cur, out, stop.id, (wait,) if wait_minutes else (), service)
+    return _legal_or_rest_first(
+        ctx, cur, out, "stop", stop.id, (wait,) if wait_minutes else (), service
+    )
 
 
 def _rest_at_stop(
@@ -1051,7 +1135,7 @@ def _ferry_choices(ctx: _Ctx, cur: _Cursor, ferry: Ferry) -> list[Choice]:
     )
     out = [Choice("continue", (*boarding, crossing), "ferry")]
     if not ferry.sleeper_cabin:
-        return _legal_or_rest_first(ctx, cur, out, None, (), (*boarding, crossing))
+        return _legal_or_rest_first(ctx, cur, out, "ferry", None, (), (*boarding, crossing))
     for kind, subs in (
         ("daily_rest", env.allowed_daily_rests),
         ("weekly_rest", env.allowed_weekly_rests),
@@ -1097,7 +1181,7 @@ def _ferry_choices(ctx: _Ctx, cur: _Cursor, ferry: Ferry) -> list[Choice]:
         unblocking = [c for c in out if _unblocks(ctx, cur, c)]
         out = unblocking or out
     out = _apply_preferences(ctx, cur, out)
-    return _legal_or_rest_first(ctx, cur, out, None, (), (*boarding, crossing))
+    return _legal_or_rest_first(ctx, cur, out, "ferry", None, (), (*boarding, crossing))
 
 
 # ---------------------------------------------------------------- legality at stops and ferries
@@ -1125,6 +1209,7 @@ def _legal_or_rest_first(
     ctx: _Ctx,
     cur: _Cursor,
     choices: list[Choice],
+    where: str,
     at: str | None,
     wait: tuple[Block, ...],
     after: tuple[Block, ...],
@@ -1139,7 +1224,7 @@ def _legal_or_rest_first(
         legal = [c for c in choices if _legal(ctx, cur, c, honour_policy)]
         if legal:
             return legal
-        fallback = _rest_first_choices(ctx, cur, choices[0].where, at, wait, after, honour_policy)
+        fallback = _rest_first_choices(ctx, cur, where, at, wait, after, honour_policy)
         if fallback:
             return fallback
     what = f"stop {at}" if at is not None else "the ferry"
