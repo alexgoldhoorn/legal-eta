@@ -76,14 +76,6 @@ def states(draw: st.DrawFn) -> DriverState:
     )
 
 
-COUNTEREXAMPLE = (
-    "counterexample: SchedulingError 'no legal plan through the ferry' under the fastest and "
-    "driver_friendly presets (strict plans the same input) for the route in "
-    "test_ferry_chain_counterexample"
-)
-
-
-@pytest.mark.xfail(strict=True, reason=COUNTEREXAMPLE)
 @settings(max_examples=150, deadline=None)
 @given(route=routes, state=states(), preset=st.sampled_from(sorted(POLICIES)))
 def test_every_plan_is_legal_and_consistent(
@@ -111,10 +103,13 @@ def test_known_impossible_state_raises() -> None:
         plan([Drive(60)], state, R, POLICIES["fastest"], CLOCK)
 
 
-@pytest.mark.xfail(strict=True, reason=COUNTEREXAMPLE)
 @pytest.mark.parametrize("preset", ["fastest", "driver_friendly"])
 def test_ferry_chain_counterexample(preset: str) -> None:
-    """Shrunk by Hypothesis: three ferries in a row after a long drive; `strict` plans it."""
+    """Shrunk by Hypothesis: three ferries in a row after a long drive; `strict` plans it.
+
+    A lookahead horizon that dead-ended (no on-board split second part at ferry c) used to
+    fail the whole plan; a dead-end horizon now only rules its candidate out.
+    """
     state = DriverState(
         driving_since_break=98,
         driving_today=99,
@@ -132,3 +127,57 @@ def test_ferry_chain_counterexample(preset: str) -> None:
     ]
     res = plan(route, state, R, POLICIES[preset], CLOCK)
     assert_legal(res, state, R, CLOCK)
+
+
+@pytest.mark.parametrize("preset", sorted(POLICIES))
+def test_road_rest_relabelled_reduced_counterexample(preset: str) -> None:
+    """Found by a 3000-example sweep after fix round 1; also hit by the property above.
+
+    The regular-rest road choice at t=543 has only 540 min inside the 24 h period, so it
+    counts as reduced with none left (Art 8(4)); it tied with the split second part (the wait
+    at X absorbs the extra 2 h) and won, and plan() raised on its own output.
+    """
+    state = DriverState(
+        last_daily_rest_end=-357,
+        split_daily_rest_first_part_taken=True,
+        reduced_daily_rests_used=3,
+    )
+    route: list[RouteItem] = [Drive(499), Stop("X", earliest=1204)]
+    res = plan(route, state, R, POLICIES[preset], CLOCK)
+    assert_legal(res, state, R, CLOCK)
+    assert [b.subtype for b in res.blocks if b.kind == "daily_rest"] == ["split_part_2"]
+
+
+@pytest.mark.parametrize("preset", sorted(POLICIES))
+def test_ferry_port_rest_counterexample(preset: str) -> None:
+    """Found by a 3000-example sweep in fix round 1 (the property above then hit the same class).
+
+    At ferry b a rest on board would start after boarding with 539 min inside the 24 h period
+    (540 needed), and a rest at the port followed by crossing as a break leaves too little of
+    the next period for a rest; a rest at the port and a second one in the cabin is legal.
+    """
+    state = DriverState(last_daily_rest_end=-412, split_daily_rest_first_part_taken=True)
+    route: list[RouteItem] = [
+        Drive(73),
+        Ferry("a", 236, sleeper_cabin=False, boarding_minutes=90),
+        Ferry("b", 840, sleeper_cabin=True, boarding_minutes=90),
+        Drive(5),
+    ]
+    res = plan(route, state, R, POLICIES[preset], CLOCK)
+    assert_legal(res, state, R, CLOCK)
+
+
+@pytest.mark.parametrize("preset", sorted(POLICIES))
+def test_port_rest_before_a_last_long_crossing(preset: str) -> None:
+    """Hit by the property: an 11 h rest on board would have 659 min inside the period.
+
+    Legal: an 11 h rest at the port, boarding, then a second rest in the cabin.
+    """
+    state = DriverState(last_daily_rest_end=-691, reduced_daily_rests_used=3)
+    route: list[RouteItem] = [Ferry("f", 811, sleeper_cabin=True, boarding_minutes=90), Drive(5)]
+    res = plan(route, state, R, POLICIES[preset], CLOCK)
+    assert_legal(res, state, R, CLOCK)
+    assert [(b.kind, b.at) for b in res.blocks if b.kind == "daily_rest"] == [
+        ("daily_rest", None),
+        ("daily_rest", "f"),
+    ]

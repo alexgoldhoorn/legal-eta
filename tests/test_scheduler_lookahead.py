@@ -132,3 +132,49 @@ def test_extension_offered_when_the_break_binds_before_the_daily_cap(clock: Cloc
     fast = plan(route, DriverState(), R, POLICIES["fastest"], clock)
     assert fast.stops[1].arrival == 690
     assert_legal(fast, DriverState(), R, clock)
+
+
+# A horizon simulation that dead-ends marks its candidate infeasible; it never fails the plan.
+
+
+def _decision_point(clock: Clock):  # type: ignore[no-untyped-def]
+    from legaleta.scheduler import _Ctx, _Cursor, _road_choices
+
+    ctx = _Ctx([Drive(600)], R, POLICIES["fastest"], clock)
+    cur = _Cursor(t=270, state=DriverState(driving_since_break=270, driving_today=270), idx=0)
+    cur.drive_left = 330
+    return ctx, cur, _road_choices(ctx, cur)
+
+
+def test_dead_end_horizon_excludes_the_candidate(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from legaleta import scheduler
+
+    ctx, cur, choices = _decision_point(clock)
+    names = [c.name for c in choices]
+    assert "break_45" in names and len(names) > 1
+    real_run = scheduler._run
+
+    def run(ctx, sim, chooser, stop_budget=None):  # type: ignore[no-untyped-def]
+        if sim.blocks[-1].kind == "break":
+            raise scheduler.SchedulingError("dead end in the horizon")
+        return real_run(ctx, sim, chooser, stop_budget)
+
+    monkeypatch.setattr(scheduler, "_run", run)
+    assert scheduler.lookahead_chooser(ctx, cur, choices).name != "break_45"
+
+
+def test_every_horizon_dead_ends_falls_back_to_the_plain_rule(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from legaleta import scheduler
+
+    ctx, cur, choices = _decision_point(clock)
+
+    def run(ctx, sim, chooser, stop_budget=None):  # type: ignore[no-untyped-def]
+        raise scheduler.SchedulingError("dead end in the horizon")
+
+    monkeypatch.setattr(scheduler, "_run", run)
+    expected = scheduler.plain_chooser(ctx, cur, choices)
+    assert scheduler.lookahead_chooser(ctx, cur, choices) == expected

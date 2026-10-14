@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -214,6 +215,7 @@ class _Scored:
     lateness: int
     slack: int
     order: int
+    feasible: bool = True  # False: the horizon simulation dead-ended (SchedulingError)
 
 
 def _score(ctx: _Ctx, cur: _Cursor, choice: Choice, order: int) -> _Scored:
@@ -224,7 +226,12 @@ def _score(ctx: _Ctx, cur: _Cursor, choice: Choice, order: int) -> _Scored:
     # the nearest binding limit; a sum would let a daily rest (which resets two of the three)
     # win every tie with a break on the road
     slack = min(e.drive_before_break, e.drive_today, e.daily_window_ends_in)
-    sim = _run(ctx, sim, plain_chooser, stop_budget=cur.stops_done + p.lookahead_stops)
+    try:
+        sim = _run(ctx, sim, plain_chooser, stop_budget=cur.stops_done + p.lookahead_stops)
+    except SchedulingError:
+        # the plain rule found no way through the horizon after this choice: the candidate is
+        # unusable, but the plan is not lost (another candidate, or the real run, may get through)
+        return _Scored(choice, math.inf, 0, slack, order, feasible=False)
     added_lateness = sim.lateness - cur.lateness
     score = (
         p.lateness_weight * added_lateness
@@ -235,8 +242,11 @@ def _score(ctx: _Ctx, cur: _Cursor, choice: Choice, order: int) -> _Scored:
     return _Scored(choice, score, added_lateness, slack, order)
 
 
-def _best(ctx: _Ctx, cur: _Cursor, choices: list[Choice]) -> _Scored:
-    scored = [_score(ctx, cur, c, i) for i, c in enumerate(choices)]
+def _best(ctx: _Ctx, cur: _Cursor, choices: list[Choice]) -> _Scored | None:
+    """The best feasible choice, or None when every horizon simulation dead-ended."""
+    scored = [s for s in (_score(ctx, cur, c, i) for i, c in enumerate(choices)) if s.feasible]
+    if not scored:
+        return None
     return min(scored, key=lambda s: (s.score, -s.slack, s.order))
 
 
@@ -246,16 +256,27 @@ def lookahead_chooser(ctx: _Ctx, cur: _Cursor, choices: list[Choice]) -> Choice:
     Stage 1 scores the choices that are not needed_only; stage 2 (all choices) runs only
     when stage 1's best is late in the horizon (beyond the lateness at the stop being
     decided), and wins only with a strictly lower score and strictly less lateness.
+
+    A choice whose horizon simulation dead-ends is infeasible and never ranked. Stage 2 also
+    runs when every stage 1 choice is infeasible. When no choice is feasible, the plain rule
+    picks over all of them: it never simulates ahead, and a later real decision point may
+    still get through. Only a dead end in the real run fails the plan.
     """
     if len(choices) == 1:
         return choices[0]
     stage1 = [c for c in choices if not c.needed_only] or choices
     best = _best(ctx, cur, stage1)
-    if best.lateness > _unavoidable_lateness(ctx, cur) and len(stage1) < len(choices):
+    if (best is None or best.lateness > _unavoidable_lateness(ctx, cur)) and len(stage1) < len(
+        choices
+    ):
         best2 = _best(ctx, cur, choices)
         # a needed_only choice wins only by being less late, never on arrival time alone
-        if best2.score < best.score and best2.lateness < best.lateness:
+        if best2 is not None and (
+            best is None or (best2.score < best.score and best2.lateness < best.lateness)
+        ):
             best = best2
+    if best is None:
+        return plain_chooser(ctx, cur, choices)
     return best.choice
 
 
@@ -745,6 +766,13 @@ def _unblocks(ctx: _Ctx, cur: _Cursor, choice: Choice) -> bool:
     return _drive_limit(ctx, sim, envelope(sim.state, ctx.rules, sim.t)) > 0
 
 
+def _validates(ctx: _Ctx, cur: _Cursor, choice: Choice) -> bool:
+    sim = cur.copy()
+    n = len(sim.blocks)
+    _commit(ctx, sim, choice)
+    return not validate(sim.blocks[n:], cur.state, ctx.rules, ctx.clock, start=cur.t)
+
+
 def _wait_next_week_choice(ctx: _Ctx, cur: _Cursor) -> Choice:
     nxt = ctx.clock.next_week_start(cur.t)
     minutes = max(nxt - cur.t, ctx.rules.weekly_rest_regular)
@@ -864,6 +892,9 @@ def _road_choices(ctx: _Ctx, cur: _Cursor) -> list[Choice]:
                 "Art 8(6)",
             )
     out = [c for c in out if _unblocks(ctx, cur, c)]
+    # a regular rest starting late in its 24 h period counts as reduced (Art 8(2)), illegal
+    # once no reduced rest is left (Art 8(4)): drop such a choice while a valid one remains
+    out = [c for c in out if _validates(ctx, cur, c)] or out
     out = _apply_preferences(ctx, cur, out)
     if not out:
         fallback = _wait_next_week_choice(ctx, cur)
@@ -1110,8 +1141,6 @@ def _rest_at_stop(
 
 
 def _ferry_choices(ctx: _Ctx, cur: _Cursor, ferry: Ferry) -> list[Choice]:
-    r = ctx.rules
-    env = envelope(cur.state, r, cur.t)
     boarding: tuple[Block, ...] = ()
     if ferry.boarding_minutes:
         boarding = (
@@ -1136,12 +1165,38 @@ def _ferry_choices(ctx: _Ctx, cur: _Cursor, ferry: Ferry) -> list[Choice]:
     out = [Choice("continue", (*boarding, crossing), "ferry")]
     if not ferry.sleeper_cabin:
         return _legal_or_rest_first(ctx, cur, out, "ferry", None, (), (*boarding, crossing))
+    out.extend(_rests_on_board(ctx, cur, ferry, boarding))
+    # when crossing as a break leaves the driver unable to drive on, only rests on board remain
+    if len(out) > 1:
+        unblocking = [c for c in out if _unblocks(ctx, cur, c)]
+        out = unblocking or out
+    out = _apply_preferences(ctx, cur, out)
+    return _legal_or_rest_first(
+        ctx,
+        cur,
+        out,
+        "ferry",
+        None,
+        (),
+        (*boarding, crossing),
+        then=lambda sim: _rests_on_board(ctx, sim, ferry, boarding),
+    )
+
+
+def _rests_on_board(
+    ctx: _Ctx, cur: _Cursor, ferry: Ferry, boarding: tuple[Block, ...]
+) -> list[Choice]:
+    """Daily and weekly rests in the sleeper cabin, as the state at cur allows (Art 9)."""
+    r = ctx.rules
+    env = envelope(cur.state, r, cur.t)
+    out: list[Choice] = []
     for kind, subs in (
         ("daily_rest", env.allowed_daily_rests),
         ("weekly_rest", env.allowed_weekly_rests),
     ):
         for sub in subs:
-            if sub.startswith("split") or not _policy_allows(ctx, env, kind, sub):
+            # a 3 h first part is not offered on board; a second part is (below)
+            if sub == "split_part_1" or not _policy_allows(ctx, env, kind, sub):
                 continue
             if (
                 kind == "weekly_rest"
@@ -1156,6 +1211,8 @@ def _ferry_choices(ctx: _Ctx, cur: _Cursor, ferry: Ferry) -> list[Choice]:
             if ferry.minutes >= probe.minutes:
                 rest = replace(probe, minutes=ferry.minutes)
                 blocks: tuple[Block, ...] = (*boarding, rest)
+            elif sub == "split_part_2":
+                continue  # not modelled: Art 9(1) names the regular daily rest as interruptible
             elif ferry.boarding_minutes > r.ferry_interruption_total:
                 continue  # Art 9(1) limits only a rest interrupted by boarding
             else:
@@ -1176,12 +1233,7 @@ def _ferry_choices(ctx: _Ctx, cur: _Cursor, ferry: Ferry) -> list[Choice]:
                     f"{kind}_{sub}_ferry", blocks, "ferry", needed_only=_needed_only(ctx, kind, sub)
                 )
             )
-    # when crossing as a break leaves the driver unable to drive on, only rests on board remain
-    if len(out) > 1:
-        unblocking = [c for c in out if _unblocks(ctx, cur, c)]
-        out = unblocking or out
-    out = _apply_preferences(ctx, cur, out)
-    return _legal_or_rest_first(ctx, cur, out, "ferry", None, (), (*boarding, crossing))
+    return out
 
 
 # ---------------------------------------------------------------- legality at stops and ferries
@@ -1213,18 +1265,21 @@ def _legal_or_rest_first(
     at: str | None,
     wait: tuple[Block, ...],
     after: tuple[Block, ...],
+    then: Callable[[_Cursor], list[Choice]] | None = None,
 ) -> list[Choice]:
     """Keep the legal choices; when none is legal, rest first (covering any wait), then go on.
 
     Legality outranks preferences: the rest is taken at the stop when it is the only legal
     option, whatever the stop or policy says about resting there. When even that fails under
     a regular-rest policy, a reduced rest after the stop is accepted rather than no plan.
+    `then` offers alternatives to `after` from the state after that first rest (at a ferry
+    with a sleeper cabin: a second rest on board instead of crossing as a break).
     """
     for honour_policy in (True, False):
         legal = [c for c in choices if _legal(ctx, cur, c, honour_policy)]
         if legal:
             return legal
-        fallback = _rest_first_choices(ctx, cur, where, at, wait, after, honour_policy)
+        fallback = _rest_first_choices(ctx, cur, where, at, wait, after, honour_policy, then)
         if fallback:
             return fallback
     what = f"stop {at}" if at is not None else "the ferry"
@@ -1242,6 +1297,7 @@ def _rest_first_choices(
     wait: tuple[Block, ...],
     after: tuple[Block, ...],
     honour_policy: bool,
+    then: Callable[[_Cursor], list[Choice]] | None = None,
 ) -> list[Choice]:
     env = envelope(cur.state, ctx.rules, cur.t)
     wait_minutes = sum(b.minutes for b in wait)
@@ -1267,4 +1323,16 @@ def _rest_first_choices(
             )
             if _legal(ctx, cur, choice, honour_policy):
                 fallback.append(choice)
+            elif then is not None:
+                sim = cur.copy()
+                _commit(ctx, sim, Choice(choice.name, (rest,), where))
+                for nxt in then(sim):
+                    both = Choice(
+                        f"{choice.name}+{nxt.name}",
+                        (rest, *nxt.blocks),
+                        where,
+                        needed_only=choice.needed_only or nxt.needed_only,
+                    )
+                    if _legal(ctx, cur, both, honour_policy):
+                        fallback.append(both)
     return fallback

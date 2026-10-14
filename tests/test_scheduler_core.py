@@ -306,3 +306,34 @@ def test_state_admitting_no_legal_plan_raises(clock: Clock) -> None:
         plan([Drive(60)], s, R, CAREFUL, clock)
     assert str(exc.value).startswith("the driver state admits no legal plan: ")
     assert "Art 8(4)" in str(exc.value)
+
+
+def test_split_part_2_on_board_when_only_it_fits_the_window(clock: Clock) -> None:
+    # a 3 h first part is on record and no reduced rest is left; the period ends at t=640.
+    # A regular rest on board (660) would have only 640 min inside it and count as reduced;
+    # the 9 h second part fits whole in the 600 min crossing, without an interruption.
+    s = DriverState(
+        last_daily_rest_end=-800,
+        split_daily_rest_first_part_taken=True,
+        reduced_daily_rests_used=3,
+    )
+    route = [Ferry("c", minutes=600, sleeper_cabin=True), Drive(60)]
+    res = plan(route, s, R, Policy(), clock)
+    assert kinds(res) == [("daily_rest", 600), ("drive", 60)]
+    rest = res.blocks[0]
+    assert rest.subtype == "split_part_2" and rest.at == "c" and rest.interruptions == ()
+    assert_legal(res, s, R, clock)
+
+
+def test_no_interrupted_split_part_2_on_board(clock: Clock) -> None:
+    # a crossing shorter than 9 h would need the rest to start at the port, interrupted by
+    # boarding; Art 9(1) admits that only for a regular daily or reduced weekly rest
+    s = DriverState(
+        last_daily_rest_end=-800,
+        split_daily_rest_first_part_taken=True,
+        reduced_daily_rests_used=3,
+    )
+    route = [Ferry("c", minutes=500, sleeper_cabin=True, boarding_minutes=20), Drive(60)]
+    res = plan(route, s, R, Policy(), clock)
+    assert not any(b.subtype == "split_part_2" and b.interruptions for b in res.blocks)
+    assert_legal(res, s, R, clock)
