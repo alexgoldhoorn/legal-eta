@@ -133,7 +133,63 @@ def _apply_break(state: DriverState, minutes: int, rules: RuleSet) -> DriverStat
 
 
 def _apply_rest(state: DriverState, block: Block, rules: RuleSet, clock: Clock) -> DriverState:
-    raise NotImplementedError  # Task 5
+    rest = block.rest_minutes
+    base = rest - block.compensation_minutes
+    if block.kind == "daily_rest" and block.subtype == "split_part_1":
+        if rest >= rules.daily_rest_split_first:
+            return replace(
+                state,
+                driving_since_break=0,
+                split_break_first_part_taken=False,
+                split_daily_rest_first_part_taken=True,
+            )
+        return _apply_break(state, rest, rules)
+    completes_split = (
+        block.kind == "daily_rest"
+        and block.subtype == "split_part_2"
+        and state.split_daily_rest_first_part_taken
+    )
+    if base < rules.daily_rest_reduced and not (
+        completes_split and base >= rules.daily_rest_split_second
+    ):
+        return _apply_break(state, rest, rules)
+    # a qualifying daily rest (every weekly rest is one too)
+    reduced_daily = base < rules.daily_rest_regular and not completes_split
+    state = replace(
+        state,
+        driving_since_break=0,
+        split_break_first_part_taken=False,
+        driving_today=0,
+        last_daily_rest_end=block.end,
+        split_daily_rest_first_part_taken=False,
+        reduced_daily_rests_used=state.reduced_daily_rests_used + (1 if reduced_daily else 0),
+    )
+    state = _pay_compensation(state, block, rules, base)
+    if block.kind == "weekly_rest" and base >= rules.weekly_rest_reduced:
+        reduced_weekly = base < rules.weekly_rest_regular
+        owed, deadline = state.compensation_owed_minutes, state.compensation_deadline
+        if reduced_weekly:
+            new_deadline = clock.week_start_after(block.end, rules.compensation_deadline_weeks + 1)
+            owed += rules.weekly_rest_regular - base
+            deadline = new_deadline if deadline is None else min(deadline, new_deadline)
+        state = replace(
+            state,
+            reduced_daily_rests_used=0,
+            last_weekly_rest_end=block.end,
+            last_weekly_rest_reduced=reduced_weekly,
+            compensation_owed_minutes=owed,
+            compensation_deadline=deadline,
+        )
+    return state
+
+
+def _pay_compensation(state: DriverState, block: Block, rules: RuleSet, base: int) -> DriverState:
+    comp = block.compensation_minutes
+    if comp <= 0 or state.compensation_owed_minutes == 0:
+        return state
+    if base >= rules.compensation_attach_min_rest and comp >= state.compensation_owed_minutes:
+        return replace(state, compensation_owed_minutes=0, compensation_deadline=None)
+    return state
 
 
 def apply(state: DriverState, block: Block, rules: RuleSet, clock: Clock) -> DriverState:
