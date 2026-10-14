@@ -166,3 +166,14 @@ def test_v9_interruptions_are_subtracted_before_classifying_the_rest(clock: Cloc
     b = Block("daily_rest", 0, 700, subtype="regular", at="ferry", interruptions=(25, 30))
     s = apply(DriverState(driving_today=400), b, R, clock)
     assert s.reduced_daily_rests_used == 1 and s.last_daily_rest_end == 700
+
+
+def test_regular_rest_with_only_nine_hours_inside_the_window_is_reduced(clock: Clock) -> None:
+    # Art 8(2): 9 h to under 11 h inside the 24 h window makes the rest a reduced one
+    s = apply(DriverState(), Block("daily_rest", 900, 660, subtype="regular"), R, clock)
+    assert s.reduced_daily_rests_used == 1 and s.last_daily_rest_end == 1560
+
+
+def test_regular_rest_with_eleven_hours_inside_the_window_is_regular(clock: Clock) -> None:
+    s = apply(DriverState(), Block("daily_rest", 700, 660, subtype="regular"), R, clock)
+    assert s.reduced_daily_rests_used == 0 and s.last_daily_rest_end == 1360

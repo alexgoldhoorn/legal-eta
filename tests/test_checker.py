@@ -180,10 +180,54 @@ def test_fortnight_driving_beyond_90_hours(clock: Clock) -> None:
     assert arts(vs) == ["Art 6(3)"] and vs[0].excess_minutes == 30
 
 
-def test_weekly_rest_starting_after_the_deadline(clock: Clock) -> None:
-    # 20000 min of work is 11360 past the first deadline (8640); that block reports one missed
-    # period and restarts the deadline at 17280, so the rest starting at 20000 is 2720 late
+def test_lapsed_weekly_deadlines_are_each_reported(clock: Clock) -> None:
+    # work to 20000 misses the deadlines at 8640 and 17280 (GN 7 restarts them period by period);
+    # the rest starting at 20000 lies in the third period (deadline 25920): no violation
     blocks = [Block("work", 0, 20000), Block("weekly_rest", 20000, 2700, subtype="regular")]
     vs = [v for v in validate(blocks, DriverState(), R, clock) if v.article == "Art 8(6)"]
-    assert [v.block_index for v in vs] == [0, 1]
-    assert vs[1].excess_minutes == 2720 and "started after" in vs[1].message
+    assert [(v.block_index, v.excess_minutes) for v in vs] == [
+        (0, 20000 - 8640),
+        (0, 20000 - 17280),
+    ]
+
+
+def test_weekly_rest_block_under_24h_is_not_a_weekly_rest(clock: Clock) -> None:
+    # 1000 min starting before the deadline (8640) but ending after it: too short to be a
+    # weekly rest, so no weekly rest started in time (deliberately stricter than the brief)
+    blocks = [Block("work", 0, 8000), Block("weekly_rest", 8000, 1000)]
+    vs = [v for v in validate(blocks, DriverState(), R, clock) if v.article == "Art 8(6)"]
+    assert [(v.block_index, v.excess_minutes) for v in vs] == [(1, 9000 - 8640)]
+    assert "no weekly rest started" in vs[0].message
+
+
+def test_second_debt_lapsing_after_first_was_reported_and_paid_is_reported(clock: Clock) -> None:
+    # D1: reduced weekly rest 0-1440 owes 1260, due at the Monday starting the 4th week.
+    # Work past it reports D1 (block 1); a regular weekly rest then repays it in full; a second
+    # reduced weekly rest creates D2, and work past D2's deadline must be reported again.
+    d1 = clock.week_start_after(1440, R.compensation_deadline_weeks + 1)
+    t_pay = d1 + 100
+    t_red = t_pay + 2700 + 1260 + 100
+    d2 = clock.week_start_after(t_red + 1440, R.compensation_deadline_weeks + 1)
+    blocks = [
+        Block("weekly_rest", 0, 1440, subtype="reduced"),
+        Block("work", 1440, t_pay - 1440),
+        Block("weekly_rest", t_pay, 2700 + 1260, subtype="regular", compensation_minutes=1260),
+        Block("work", t_pay + 3960, 100),
+        Block("weekly_rest", t_red, 1440, subtype="reduced"),
+        Block("work", t_red + 1440, d2 - t_red - 1440 + 60),
+    ]
+    vs = validate(blocks, DriverState(), R, clock)
+    comp = [v for v in vs if v.article in ("Art 8(6b)", "Art 8(7)")]
+    assert [v.block_index for v in comp] == [1, 5]
+
+
+def test_fourth_edge_rest_counts_as_reduced(clock: Clock) -> None:
+    # each 660 min "regular" rest starts 540 min before its window closes, so Art 8(2) counts
+    # it as reduced; Art 8(4) allows three between weekly rests, so the fourth is an infringement
+    blocks: list[Block] = []
+    t = 0
+    for _ in range(4):
+        blocks += [Block("work", t, 900), Block("daily_rest", t + 900, 660, subtype="regular")]
+        t += 1560
+    vs = validate(blocks, DriverState(), R, clock)
+    assert arts(vs) == ["Art 8(4)"] and vs[0].block_index == 7

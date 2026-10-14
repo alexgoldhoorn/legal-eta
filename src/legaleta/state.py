@@ -155,7 +155,10 @@ def _apply_rest(state: DriverState, block: Block, rules: RuleSet, clock: Clock) 
     ):
         return _apply_break(state, rest, rules)
     # a qualifying daily rest (every weekly rest is one too)
-    reduced_daily = base < rules.daily_rest_regular and not completes_split
+    # Art 8(2): a rest with 9 h to under 11 h inside its 24 h window counts as reduced
+    inside = min(block.end, state.last_daily_rest_end + rules.daily_window) - block.start
+    classified = min(base, inside) if inside >= rules.daily_rest_reduced else base
+    reduced_daily = classified < rules.daily_rest_regular and not completes_split
     state = replace(
         state,
         driving_since_break=0,

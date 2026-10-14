@@ -89,19 +89,6 @@ def validate(
             out.append(
                 Violation("Art 4(g)", i, "split_part_2 without a first part of 3 h on record")
             )
-        if (
-            b.kind == "daily_rest"
-            and b.subtype == "reduced"
-            and before.reduced_daily_rests_used >= rules.reduced_daily_rests_between_weekly
-        ):
-            out.append(
-                Violation(
-                    "Art 8(4)",
-                    i,
-                    f"reduced daily rest number {before.reduced_daily_rests_used + 1} between "
-                    f"two weekly rests (max {rules.reduced_daily_rests_between_weekly})",
-                )
-            )
         if b.kind == "weekly_rest" and b.subtype == "reduced" and before.last_weekly_rest_reduced:
             out.append(
                 Violation(
@@ -156,6 +143,24 @@ def validate(
 
         state = apply(state, b, rules, clock)
         e = envelope(state, rules, b.end)
+
+        # Art 8(4): counted by apply(), so a rest that Art 8(2) makes reduced counts too
+        if (
+            b.kind == "daily_rest"
+            and (
+                b.subtype == "reduced"
+                or state.reduced_daily_rests_used > before.reduced_daily_rests_used
+            )
+            and before.reduced_daily_rests_used >= rules.reduced_daily_rests_between_weekly
+        ):
+            out.append(
+                Violation(
+                    "Art 8(4)",
+                    i,
+                    f"reduced daily rest number {before.reduced_daily_rests_used + 1} between "
+                    f"two weekly rests (max {rules.reduced_daily_rests_between_weekly})",
+                )
+            )
 
         if b.kind == "drive":
             if e.drive_before_break < 0:
@@ -219,40 +224,37 @@ def validate(
                 )
                 window_end = b.end + rules.daily_window  # the next window starts at its end (GN 7)
             else:
-                out.append(
-                    Violation(
-                        "Art 8(2)",
-                        i,
-                        "no daily rest completed within 24 h of the previous rest",
-                        b.end - window_end,
+                while b.end > window_end:  # one report per lapsed period (GN 7, repeatedly)
+                    out.append(
+                        Violation(
+                            "Art 8(2)",
+                            i,
+                            "no daily rest completed within 24 h of the previous rest",
+                            b.end - window_end,
+                        )
                     )
-                )
-                window_end += rules.daily_window
+                    window_end += rules.daily_window
 
         # Art 8(6): the weekly rest must start by the deadline
         if state.last_weekly_rest_end == b.end and b.kind == "weekly_rest":
-            if b.start > weekly_deadline:
+            # the deadlines were advanced past every earlier block, so it started in time
+            weekly_deadline = b.end + rules.weekly_rest_deadline
+        else:
+            # a weekly_rest block under 24 h that starts in time is not a weekly rest: reported
+            while b.end > weekly_deadline:  # one report per lapsed period
                 out.append(
                     Violation(
                         "Art 8(6)",
                         i,
-                        "weekly rest started after six 24 h periods",
-                        b.start - weekly_deadline,
+                        "no weekly rest started within six 24 h periods of the previous one",
+                        b.end - weekly_deadline,
                     )
                 )
-            weekly_deadline = b.end + rules.weekly_rest_deadline
-        elif b.end > weekly_deadline:
-            out.append(
-                Violation(
-                    "Art 8(6)",
-                    i,
-                    "no weekly rest started within six 24 h periods of the previous one",
-                    b.end - weekly_deadline,
-                )
-            )
-            weekly_deadline += rules.weekly_rest_deadline
+                weekly_deadline += rules.weekly_rest_deadline
 
-        # Art 8(6b): the deadline passed with debt still owed (reported once)
+        # Art 8(6b): the deadline passed with debt still owed (reported once per debt)
+        if state.compensation_owed_minutes == 0:
+            compensation_reported = False
         if (
             not compensation_reported
             and state.compensation_owed_minutes > 0
