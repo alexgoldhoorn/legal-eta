@@ -7,7 +7,7 @@ from dataclasses import dataclass, field, replace
 
 from legaleta.checker import validate
 from legaleta.clock import Clock
-from legaleta.policy import Policy
+from legaleta.policy import PREFERENCE_WEIGHTS, Policy
 from legaleta.rules import RuleSet
 from legaleta.state import DriverState, Envelope, apply, envelope
 from legaleta.timeline import REST_KINDS, Block, Drive, Ferry, RouteItem, Stop, merge_drives
@@ -87,6 +87,7 @@ class _Cursor:
     penalty: float = 0.0
     extend_today: bool = False
     reduced_today: bool = False
+    extension_minutes: int = 0  # rest added by policy.extend_rest_to; not an arrival cost
 
     def copy(self) -> _Cursor:
         return _Cursor(
@@ -102,6 +103,7 @@ class _Cursor:
             self.penalty,
             self.extend_today,
             self.reduced_today,
+            self.extension_minutes,
         )
 
 
@@ -139,9 +141,42 @@ def _base_name(name: str) -> str:
     return name.removesuffix("_here").removesuffix("_ferry").removesuffix("_before")
 
 
+# a break at a stop that covers idle time and lengthens the stop by at most this much is
+# "nearly free"
+_NEARLY_FREE_MINUTES = 15
+
+
+def _total(choice: Choice) -> int:
+    return sum(b.minutes for b in choice.blocks)
+
+
+def _break_minutes(choice: Choice) -> int:
+    return sum(b.minutes for b in choice.blocks if b.kind == "break")
+
+
 def plain_chooser(ctx: _Ctx, cur: _Cursor, choices: list[Choice]) -> Choice:
-    """Latest-legal: continue when possible, else the smallest block that unblocks."""
+    """Latest-legal: continue when possible, else the smallest block that unblocks.
+
+    A break at a stop that covers idle time there and costs at most _NEARLY_FREE_MINUTES more
+    than continuing is taken ahead of continue. A break that covers nothing is never nearly
+    free: it costs its whole length.
+    """
     primary = [c for c in choices if not c.needed_only] or choices
+    cont = next((c for c in primary if c.name == "continue"), None)
+    if cont is not None:
+        nearly_free = [
+            c
+            for c in primary
+            if c.name.startswith("break_")
+            and c.name.endswith("_here")
+            and _total(c) - _total(cont) <= _NEARLY_FREE_MINUTES
+            and _total(c) - _total(cont) < _break_minutes(c)
+        ]
+        if nearly_free:
+            return min(
+                nearly_free,
+                key=lambda c: (_total(c), _RANK.get(_base_name(c.name), 99)),
+            )
     return min(primary, key=lambda c: _RANK.get(_base_name(c.name), 99))
 
 
@@ -166,7 +201,8 @@ def _score(ctx: _Ctx, cur: _Cursor, choice: Choice, order: int) -> _Scored:
     added_lateness = sim.lateness - cur.lateness
     score = (
         p.lateness_weight * added_lateness
-        + p.arrival_weight * (sim.t - cur.t)
+        # time the driver asked to sleep (extend_rest_to) is not an arrival cost
+        + p.arrival_weight * ((sim.t - cur.t) - (sim.extension_minutes - cur.extension_minutes))
         + (sim.penalty - cur.penalty)
     )
     return _Scored(choice, score, added_lateness, slack, order)
@@ -257,6 +293,16 @@ def _emit(ctx: _Ctx, cur: _Cursor, block: Block) -> None:
     if block.minutes == 0:
         return
     block = replace(block, start=cur.t)
+    if block.kind in REST_KINDS:
+        stretched = _extend_rest(ctx, cur, block.kind, block.start, block.minutes)
+        if stretched > block.minutes:
+            extra = stretched - block.minutes
+            cur.extension_minutes += extra
+            block = replace(
+                block,
+                minutes=stretched,
+                reason=block.reason + f", extended by {extra} min (policy extend_rest_to)",
+            )
     p = ctx.policy
     wanted_regular = p.daily_rest_type == "regular" or (
         p.daily_rest_type == "reduced_when_needed" and not cur.reduced_today
@@ -461,8 +507,7 @@ def _rest_block(
 ) -> Block:
     base = minutes if minutes is not None else _rest_minutes(ctx, kind, sub)
     comp = _compensation_now(ctx, cur, kind, sub, start_t)
-    total = base + comp + sum(interruptions)
-    total = _extend_rest(ctx, cur, kind, start_t, total)
+    total = base + comp + sum(interruptions)  # extend_rest_to is applied in _emit
     text, article = _REST_TEXT[(kind, sub)]
     inside = _inside_window(ctx, cur, start_t, total)
     by_window = (
@@ -512,11 +557,73 @@ def _break_block(ctx: _Ctx, minutes: int, at: str | None, reason: str) -> Block:
 
 
 def _extend_rest(ctx: _Ctx, cur: _Cursor, kind: str, start_t: int, total: int) -> int:
-    return total  # Task 11: policy.extend_rest_to
+    """policy.extend_rest_to: lengthen a rest to end at the next given local time (bounded)."""
+    p = ctx.policy
+    if p.extend_rest_to is None:
+        return total
+    end = start_t + total
+    target = ctx.clock.next_local_minute(end, p.extend_rest_to)
+    extra = target - end
+    return total + extra if 0 < extra <= p.extend_rest_max_minutes else total
+
+
+def _rest_blocks_with_start(choice: Choice, cur: _Cursor) -> list[tuple[Block, int]]:
+    out: list[tuple[Block, int]] = []
+    t = cur.t
+    for b in choice.blocks:
+        if b.kind in REST_KINDS:
+            out.append((b, t))
+        t += b.minutes
+    return out
 
 
 def _apply_preferences(ctx: _Ctx, cur: _Cursor, choices: list[Choice]) -> list[Choice]:
-    return choices  # Task 11: rest_places, rest_start_window
+    """policy.rest_places and policy.rest_start_window: drop (hard) or penalise (soft) rests.
+
+    On the road, a knob that would remove every choice is dropped instead and warned about.
+    """
+    p = ctx.policy
+    on_road = bool(choices) and choices[0].where == "road"
+
+    def pass_(knob: str, cs: list[Choice]) -> list[Choice]:
+        kept: list[Choice] = []
+        for c in cs:
+            penalty, drop = 0.0, False
+            for b, t0 in _rest_blocks_with_start(c, cur):
+                if (
+                    knob == "rest_places"
+                    and b.at is None
+                    and b.kind in REST_KINDS
+                    and c.name != "wait_next_week"
+                ):
+                    if p.rest_places == "tagged_only":
+                        drop = True
+                    elif p.rest_places == "prefer_tagged":
+                        penalty += PREFERENCE_WEIGHTS["rest_places"]
+                if (
+                    knob == "rest_start_window"
+                    and p.rest_start_window is not None
+                    and b.kind == "daily_rest"
+                    and not p.rest_start_window.contains(ctx.clock.minute_of_day(t0))
+                ):
+                    if p.rest_start_window.hard:
+                        drop = True
+                    else:
+                        penalty += p.rest_start_window.weight * 60.0
+            if not drop:
+                kept.append(replace(c, penalty=c.penalty + penalty) if penalty else c)
+        if on_road and not kept:
+            _warn(
+                cur,
+                f"PREFERENCE_UNMET:{knob}",
+                f"policy.{knob} could not be honoured without breaking the rules; "
+                "latest-legal placement used",
+                "",
+            )
+            return cs
+        return kept
+
+    return pass_("rest_start_window", pass_("rest_places", choices))
 
 
 def _policy_allows(ctx: _Ctx, env: Envelope, kind: str, sub: str) -> bool:
@@ -742,8 +849,34 @@ def _extra_stop_break_choices(
     idle: int,
     base: tuple[Block, ...],
     service: tuple[Block, ...],
-) -> tuple[list[Choice], float]:
-    return [], 0.0  # Task 11: break_timing and split_breaks=prefer
+) -> tuple[list[Choice], dict[str, float]]:
+    """policy.break_timing and split_breaks="prefer": extra break choices, and the penalties
+    for the choices that do not honour them (by choice name)."""
+    r, p = ctx.rules, ctx.policy
+    extra: list[Choice] = []
+    penalties: dict[str, float] = {}
+    wait = base[0] if base and base[0].kind == "wait" else None
+    convenient = (
+        cur.state.driving_since_break >= p.earliest_convenient_after_minutes and idle < r.break_full
+    )
+    if convenient and (
+        p.break_timing == "earliest_convenient"
+        or (p.break_timing == "balanced" and idle >= r.break_full - _NEARLY_FREE_MINUTES)
+    ):
+        extra.append(_break_at_stop(ctx, cur, stop, r.break_full, "break_45_here", wait, service))
+        # a 15 min first part does not take the break either
+        for name in ("continue", "break_15_here"):
+            penalties[name] = penalties.get(name, 0.0) + PREFERENCE_WEIGHTS["break_timing"]
+    if (
+        p.split_breaks == "prefer"
+        and not cur.state.split_break_first_part_taken
+        and idle < r.break_split_first
+    ):
+        extra.append(
+            _break_at_stop(ctx, cur, stop, r.break_split_first, "break_15_here", wait, service)
+        )
+        penalties["continue"] = penalties.get("continue", 0.0) + PREFERENCE_WEIGHTS["split_breaks"]
+    return extra, penalties
 
 
 def _break_at_stop(
@@ -760,16 +893,23 @@ def _break_at_stop(
         f"{minutes} min break at {stop.id} (break due within "
         f"{p.break_at_stop_lookahead_minutes} min of driving after this stop)"
     )
-    if wait is not None and wait.minutes > 0:
-        brk = _break_block(
-            ctx, max(minutes, wait.minutes), stop.id, reason + ", covering the wait for the window"
-        )
-        return Choice(name, (brk, *service), "stop")
-    brk = _break_block(ctx, minutes, stop.id, reason)
+    waited = wait.minutes if wait is not None else 0
+    idle_service = tuple(b for b in service if b.kind == "wait" and b.counts_as_rest)
+    other = tuple(b for b in service if not (b.kind == "wait" and b.counts_as_rest))
+    covered = waited + sum(b.minutes for b in idle_service)
+    if covered > 0:
+        what = [
+            *(["the wait for the window"] if waited else []),
+            *([f"the idle time at {stop.id}"] if idle_service else []),
+        ]
+        reason += ", covering " + " and ".join(what)
+    brk = _break_block(ctx, max(minutes, covered), stop.id, reason)
+    if waited:
+        return Choice(name, (brk, *other), "stop")  # the wait comes before any service
     blocks = (
-        (brk, *service)
+        (brk, *other)
         if p.break_at_working_stop == "before" or not stop.driver_works
-        else (*service, brk)
+        else (*other, brk)
     )
     return Choice(name, blocks, "stop")
 
@@ -814,10 +954,32 @@ def _stop_choices(ctx: _Ctx, cur: _Cursor, stop: Stop) -> list[Choice]:
                         ctx, cur, stop, r.break_split_first, "break_15_here", wait, service
                     )
                 )
-    extra, continue_penalty = _extra_stop_break_choices(ctx, cur, stop, env, idle, base, service)
+    extra, penalties = _extra_stop_break_choices(ctx, cur, stop, env, idle, base, service)
     out.extend(extra)
-    if continue_penalty:
-        out[0] = replace(out[0], penalty=continue_penalty)
+    # a break offered both by the due-soon rule and by a preference is scored once
+    seen: set[str] = set()
+    deduped: list[Choice] = []
+    for c in out:
+        if c.name not in seen:
+            seen.add(c.name)
+            deduped.append(c)
+    out = deduped
+    out = [
+        replace(c, penalty=c.penalty + penalties[c.name]) if c.name in penalties else c for c in out
+    ]
+    if (
+        p.extended_driving == "when_needed"
+        and env.extension_available
+        and not cur.extend_today
+        and env.drive_today_unextended < next_drive
+    ):
+        # the 9 h cap binds before the next stop: let stage 2 (and its horizon) extend from here
+        out.extend(
+            [
+                replace(c, name=f"{c.name}+extend_day", needed_only=True, sets_extend=True)
+                for c in out
+            ]
+        )
     if stop.rest_allowed:
         rest_due_soon = (
             env.daily_window_ends_in - _shortest_daily_rest(ctx, cur, env) - next_drive
