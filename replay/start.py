@@ -46,9 +46,7 @@ def _raw_from_remaining(rem: dict[str, Any], regs: Regs) -> dict[str, int | bool
             0, regs.fortnight_driving - rem["remaining_drive_fortnight"] - this_week
         ),
         "daily_rest_end": -(regs.daily_window - rem["daily_rest_due_in"]),
-        "weekly_rest_end": -(
-            6 * regs.daily_window + 2 * regs.daily_window - rem["weekly_rest_due_in"]
-        ),
+        "weekly_rest_end": -(regs.weekly_rest_deadline - rem["weekly_rest_due_in"]),
         "compensation_deadline": deadline,
     }
 

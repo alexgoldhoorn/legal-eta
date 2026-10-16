@@ -87,7 +87,19 @@ def _v(code: str, article: str, message: str, minute: int | None, excess: int = 
     return Finding("VIOLATION", code, message, article, minute, None, excess)
 
 
-def check_rests(  # noqa: C901
+@dataclass(frozen=True)
+class RestEnd:
+    """Rest-side state at the end of the log."""
+
+    daily_rest_end: int
+    weekly_rest_end: int
+    last_weekly_reduced: bool
+    reduced_used: int
+    owed: int
+    owed_due: int | None
+
+
+def check_rests(
     acts: list[Activity],
     rests: list[RestPeriod],
     regs: Regs,
@@ -95,9 +107,21 @@ def check_rests(  # noqa: C901
     counters: StartCounters,
     weeks: Weeks,
 ) -> list[Finding]:
+    return walk_rests(acts, rests, regs, sw, counters, weeks)[0]
+
+
+def walk_rests(  # noqa: C901
+    acts: list[Activity],
+    rests: list[RestPeriod],
+    regs: Regs,
+    sw: Switches,
+    counters: StartCounters,
+    weeks: Weeks,
+) -> tuple[list[Finding], RestEnd]:
     out: list[Finding] = []
     log_end = acts[-1].end if acts else 0
     ps = counters.daily_rest_end
+    last_daily_end = counters.daily_rest_end
     free_first = False
     if sw.overdue_start_restarts_period:
         while ps + regs.daily_window < regs.daily_rest_reduced:
@@ -117,7 +141,7 @@ def check_rests(  # noqa: C901
             split_start = r.start
             continue
         if r.prehistory:
-            ps = r.end
+            ps = last_daily_end = r.end
             continue
         cap = 0
         if r.kind.startswith("weekly"):
@@ -222,7 +246,7 @@ def check_rests(  # noqa: C901
                         sum(r.interruptions) - regs.ferry_interruption_total,
                     )
                 )
-        ps = r.end
+        ps = last_daily_end = r.end
         for d in sorted(debts, key=lambda d: (d.due is None, d.due or 0)):
             if cap <= 0:
                 break
@@ -264,4 +288,13 @@ def check_rests(  # noqa: C901
                 log_end - (wre + regs.weekly_rest_deadline),
             )
         )
-    return out
+    dues = [d.due for d in debts if d.due is not None]
+    end = RestEnd(
+        last_daily_end,
+        wre,
+        prev_weekly_reduced,
+        reduced_used,
+        sum(d.amount for d in debts),
+        min(dues) if dues else None,
+    )
+    return out, end

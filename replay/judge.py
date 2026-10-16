@@ -2,15 +2,32 @@
 
 from __future__ import annotations
 
-from zoneinfo import ZoneInfo
+from datetime import tzinfo
 
-from replay.judge_driving import check_driving
-from replay.judge_rest import check_rests, recognise_rests
+from replay.judge_driving import DrivingEnd, walk_driving
+from replay.judge_rest import RestEnd, recognise_rests, walk_rests
 from replay.log import ActivityLog
 from replay.regs import Regs
 from replay.start import StartCounters
 from replay.types import Activity, Finding, Switches
 from replay.weeks import Weeks
+
+
+def judge_walk(
+    log: ActivityLog,
+    prehist: list[Activity],
+    counters: StartCounters,
+    regs: Regs,
+    sw: Switches,
+    week_tz: tzinfo,
+) -> tuple[list[Finding], DrivingEnd, RestEnd]:
+    acts = sorted([*prehist, *log.activities], key=lambda a: (a.start, a.end))
+    weeks = Weeks(log.origin, week_tz)
+    initial = None if prehist else counters.daily_rest_end
+    rests = recognise_rests(acts, regs, sw, initial)
+    f1, dend = walk_driving(acts, regs, rests, counters, weeks)
+    f2, rend = walk_rests(acts, rests, regs, sw, counters, weeks)
+    return [*f1, *f2], dend, rend
 
 
 def judge(
@@ -19,13 +36,6 @@ def judge(
     counters: StartCounters,
     regs: Regs,
     sw: Switches,
-    week_tz: ZoneInfo,
+    week_tz: tzinfo,
 ) -> list[Finding]:
-    acts = sorted([*prehist, *log.activities], key=lambda a: (a.start, a.end))
-    weeks = Weeks(log.origin, week_tz)
-    initial = None if prehist else counters.daily_rest_end
-    rests = recognise_rests(acts, regs, sw, initial)
-    return [
-        *check_driving(acts, regs, rests, counters, weeks),
-        *check_rests(acts, rests, regs, sw, counters, weeks),
-    ]
+    return judge_walk(log, prehist, counters, regs, sw, week_tz)[0]

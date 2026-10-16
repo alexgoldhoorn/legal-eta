@@ -25,9 +25,11 @@ def _kind(block: dict, sw: Switches) -> Kind:  # type: ignore[type-arg]
         return "DRIVE"
     if bk == "work":
         return "WORK"
+    counts = bool(block.get("counts_as_rest"))
+    if bk == "break" and counts:  # idle service at a stop, counted as a break by assumption
+        return "REST" if sw.wait_counts_as_rest else "AVAIL"
     if bk in _REST_BLOCKS:
         return "REST"
-    counts = bool(block.get("counts_as_rest"))
     if bk == "wait":
         return "REST" if counts and sw.wait_counts_as_rest else "AVAIL"
     return "REST" if counts else "AVAIL"  # ferry

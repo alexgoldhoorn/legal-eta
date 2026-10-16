@@ -83,3 +83,8 @@ def test_unrepresentable_state_reports_finding() -> None:
     acts, _, findings = _pre({"raw": raw})
     assert [f.code for f in findings] == ["STATE_UNREPRESENTABLE"]
     assert acts == []
+
+
+def test_remaining_weekly_rest_due_in_is_start_by_8640() -> None:
+    _, c, _ = _pre(_remaining(weekly_rest_due_in=6000))
+    assert c.weekly_rest_end == -(8640 - 6000)

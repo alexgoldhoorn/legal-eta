@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from replay.regs import Regs
 from replay.start import StartCounters
 from replay.types import Activity, Finding, RestPeriod
@@ -16,6 +18,31 @@ _DAILY_BOUNDARY = {
 }
 
 
+@dataclass(frozen=True)
+class DrivingEnd:
+    """Driving counters at the end of the log, as a look-back over it."""
+
+    since_break: int
+    split_first_taken: bool
+    today: int
+    extended_days: int
+    this_week: int
+    last_week: int
+
+
+def walk_driving(
+    acts: list[Activity],
+    regs: Regs,
+    rests: list[RestPeriod],
+    counters: StartCounters,
+    weeks: Weeks,
+) -> tuple[list[Finding], DrivingEnd]:
+    f1, since, pending = _check_breaks(acts, regs)
+    f2, extended, today = _check_daily(acts, regs, rests, counters)
+    f3, this_week, last_week = _check_weekly(acts, regs, counters, weeks)
+    return [*f1, *f2, *f3], DrivingEnd(since, pending, today, extended, this_week, last_week)
+
+
 def check_driving(
     acts: list[Activity],
     regs: Regs,
@@ -23,14 +50,10 @@ def check_driving(
     counters: StartCounters,
     weeks: Weeks,
 ) -> list[Finding]:
-    return [
-        *_check_breaks(acts, regs),
-        *_check_daily(acts, regs, rests, counters),
-        *_check_weekly(acts, regs, counters, weeks),
-    ]
+    return walk_driving(acts, regs, rests, counters, weeks)[0]
 
 
-def _check_breaks(acts: list[Activity], regs: Regs) -> list[Finding]:
+def _check_breaks(acts: list[Activity], regs: Regs) -> tuple[list[Finding], int, bool]:
     """Art 7: within every 4.5 h of driving a 45 min break, or 15 min then 30 min."""
     out: list[Finding] = []
     driven = 0
@@ -74,7 +97,8 @@ def _check_breaks(acts: list[Activity], regs: Regs) -> list[Finding]:
                 elif reported:
                     out[-1] = _more(out[-1], driven - regs.break_after_driving)
         prev_end = a.end
-    return out
+    flush()
+    return out, driven, pending_first
 
 
 def _more(f: Finding, excess: int) -> Finding:
@@ -83,16 +107,19 @@ def _more(f: Finding, excess: int) -> Finding:
 
 def _check_daily(
     acts: list[Activity], regs: Regs, rests: list[RestPeriod], counters: StartCounters
-) -> list[Finding]:
+) -> tuple[list[Finding], int, int]:
     """Art 6(1): driving between daily rests, 10 h at most twice between weekly rests."""
     out: list[Finding] = []
     bounds = sorted(
         (r.end, r.kind.startswith("weekly")) for r in rests if r.kind in _DAILY_BOUNDARY
     )
     i, seg, seg_start, extended = 0, 0, 0, counters.extended_days_used_this_week
+    seg_prior = (
+        False  # the segment holds the start state's driving: its extension is already counted
+    )
 
     def close(minute: int) -> None:
-        nonlocal seg, extended
+        nonlocal seg, extended, seg_prior
         if seg > regs.daily_driving_extended:
             out.append(
                 Finding(
@@ -104,7 +131,7 @@ def _check_daily(
                     excess_minutes=seg - regs.daily_driving_extended,
                 )
             )
-        elif seg > regs.daily_driving:
+        elif seg > regs.daily_driving and not seg_prior:
             extended += 1
             if extended > regs.extended_days_per_week:
                 out.append(
@@ -117,7 +144,7 @@ def _check_daily(
                         excess_minutes=seg - regs.daily_driving,
                     )
                 )
-        seg = 0
+        seg, seg_prior = 0, False
 
     for a in acts:
         while i < len(bounds) and bounds[i][0] <= a.start:
@@ -128,15 +155,22 @@ def _check_daily(
         if a.kind == "DRIVE":
             if seg == 0:
                 seg_start = a.start
+            seg_prior = seg_prior or (a.label.block_index is None and a.start < 0)
             seg += a.minutes
+    while i < len(bounds):
+        close(bounds[i][0])
+        if bounds[i][1]:
+            extended = 0
+        i += 1
+    open_today = seg
     if seg:
         close(seg_start)
-    return out
+    return out, extended, open_today
 
 
 def _check_weekly(
     acts: list[Activity], regs: Regs, counters: StartCounters, weeks: Weeks
-) -> list[Finding]:
+) -> tuple[list[Finding], int, int]:
     """Art 6(2) and 6(3): calendar-week totals and any two consecutive weeks."""
     first = weeks.floor(0)
     totals = {
@@ -147,6 +181,11 @@ def _check_weekly(
     last_end: dict[int, int] = {}
     for a in acts:
         if a.kind != "DRIVE":
+            continue
+        if a.label.block_index is None and a.start < 0:
+            # the start state's weekly total already counts today's driving, wherever it lies
+            totals[first] += a.minutes
+            last_end.setdefault(first, a.end)
             continue
         t, w = a.start, weeks.floor(a.start)
         while t < a.end:
@@ -181,4 +220,5 @@ def _check_weekly(
                     excess_minutes=both - regs.fortnight_driving,
                 )
             )
-    return out
+    end = weeks.floor(acts[-1].end if acts else 0)
+    return out, totals.get(end, 0), totals.get(weeks.shift(end, -1), 0)

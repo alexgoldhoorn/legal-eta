@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import UTC, datetime, timedelta, tzinfo
 
 
 class Weeks:
-    def __init__(self, origin: datetime, tz: ZoneInfo) -> None:
+    def __init__(self, origin: datetime, tz: tzinfo) -> None:
         # UTC on purpose: subtracting two datetimes that share one ZoneInfo is wall-clock arithmetic
         self.origin = origin.astimezone(UTC)
         self.tz = tz
