@@ -246,3 +246,12 @@ def test_daily_rest_of_9h_plus_the_debt_pays_compensation() -> None:
     assert _by_code(_rest_findings(paid, c), "COMPENSATION_UNPAID") == []
     short = [act("REST", 0, 900, "daily_rest"), act("AVAIL", 900, 2100)]
     assert _by_code(_rest_findings(short, c), "COMPENSATION_UNPAID")
+
+
+def test_window_rule_ignores_a_period_that_lapsed_before_the_start() -> None:
+    """Guidance Note 7: after a lapsed period the next one is counted from its end."""
+    long_rest = [act("REST", 0, 1573, "daily_rest")]
+    assert _kinds(long_rest, ps=-1338) == ["daily_regular"]
+    assert _kinds(long_rest, Switches(overdue_start_restarts_period=False), ps=-1338) == [
+        "daily_reduced"
+    ]

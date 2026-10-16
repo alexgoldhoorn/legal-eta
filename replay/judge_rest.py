@@ -85,6 +85,12 @@ def recognise_rests(
             add(m, "weekly_regular" if e >= regs.weekly_rest_regular else "weekly_reduced")
             ps, pending = m.end, None
         elif e >= regs.daily_rest_regular:
+            while (
+                sw.overdue_start_restarts_period
+                and ps is not None
+                and (ps + regs.daily_window < regs.daily_rest_reduced)
+            ):
+                ps += regs.daily_window  # a period that lapsed before the start is restarted
             inside = e if ps is None else min(m.end, ps + regs.daily_window) - max(m.start, ps)
             late = sw.window_reduced and ps is not None and inside < regs.daily_rest_regular
             add(m, "daily_reduced" if late else "daily_regular")
