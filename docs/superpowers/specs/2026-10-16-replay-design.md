@@ -119,11 +119,23 @@ route and policy.
 - **Differential check** against `legaleta validate` on the same blocks: they must agree on pass/fail.
   Disagreements are listed, not asserted, because they are the interesting output.
 
-### Inputs for the first runs
+### Inputs: what gets replayed
 
-The 19 fixtures in `tests/fixtures/sim/` and `examples/`, each in `fastest`, `driver_friendly` and
-`strict`; Hypothesis-generated requests (multi-week routes, ferries with and without cabin, windows,
-awkward initial driver states, compensation debts); `remaining`-form drivers.
+- **Request file or directory**: the `legaleta plan` request JSON (route, driver, rules, policy). The
+  comparator calls `plan_json` at run time and the core replays the response. A directory runs every
+  `*.json`.
+- **Request + response pair**: replays a plan made earlier or elsewhere (an older legaleta version, a
+  plan from another tool, a simulator day). This is the regression-corpus form and the one the fleet
+  simulator will use.
+- **Sweep options**: `--policy fastest,driver_friendly,strict` (default all three), `--rules` overrides.
+- **Stored sources**: `tests/fixtures/sim/` (the 19 freight-simulator routes), `examples/`, and
+  `replay/corpus/` (below). Created beforehand and versioned.
+- **Generated (random, seeded)**: `python -m replay fuzz --seed N --count M` builds multi-week routes,
+  ferries with and without cabin, windows, awkward initial driver states, compensation debts and
+  `remaining`-form drivers. The seed makes a run reproducible. Every failing case is written to
+  `replay/corpus/` as a request file (plus the seed that found it), so a bug becomes a permanent
+  regression case. Requests that legaleta rejects as invalid or unplannable are counted, not failed.
+- **Freight simulator datasets**: through the existing `scripts/export_sim_fixtures.py`; nothing new.
 
 ## Constraints
 
