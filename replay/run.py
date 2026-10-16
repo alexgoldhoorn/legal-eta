@@ -42,9 +42,10 @@ def replay_plan(
     request: dict,  # type: ignore[type-arg]
     response: dict,  # type: ignore[type-arg]
     sw: Switches = Switches(),  # noqa: B008
+    reclassify: bool = True,
 ) -> Report:
     findings, checked = _pipeline(request, response, sw)
-    if any(f.cls not in _NEUTRAL for f in findings):
+    if reclassify and any(f.cls not in _NEUTRAL for f in findings):
         flipped = []
         for fld in fields(sw):
             alt = replace(sw, **{fld.name: not getattr(sw, fld.name)})
