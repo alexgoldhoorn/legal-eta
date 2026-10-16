@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import tzinfo
 
 from replay.judge_driving import DrivingEnd, walk_driving
@@ -20,13 +21,14 @@ def judge_walk(
     regs: Regs,
     sw: Switches,
     week_tz: tzinfo,
+    ferries: Mapping[str, tuple[int, bool]] | None = None,
 ) -> tuple[list[Finding], DrivingEnd, RestEnd]:
     acts = sorted([*prehist, *log.activities], key=lambda a: (a.start, a.end))
     weeks = Weeks(log.origin, week_tz)
     initial = None if prehist else counters.daily_rest_end
     rests = recognise_rests(acts, regs, sw, initial)
     f1, dend = walk_driving(acts, regs, rests, counters, weeks)
-    f2, rend = walk_rests(acts, rests, regs, sw, counters, weeks)
+    f2, rend = walk_rests(acts, rests, regs, sw, counters, weeks, ferries)
     return [*f1, *f2], dend, rend
 
 

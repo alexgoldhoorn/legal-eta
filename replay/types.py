@@ -55,6 +55,7 @@ class RestPeriod:
     interruptions: tuple[int, ...] = ()
     in_vehicle: bool = False
     prehistory: bool = False
+    at: str | None = None
 
 
 @dataclass(frozen=True)

@@ -15,9 +15,9 @@ def _kinds(acts, sw=SW, ps=None):  # type: ignore[no-untyped-def]
     return [r.kind for r in recognise_rests(acts, Regs(), sw, ps)]
 
 
-def _rest_findings(acts, c=None, sw=SW, origin=MONDAY):  # type: ignore[no-untyped-def]
+def _rest_findings(acts, c=None, sw=SW, origin=MONDAY, ferries=None):  # type: ignore[no-untyped-def]
     rests = recognise_rests(acts, Regs(), sw, (c or counters()).daily_rest_end)
-    return check_rests(acts, rests, Regs(), sw, c or counters(), weeks(origin))
+    return check_rests(acts, rests, Regs(), sw, c or counters(), weeks(origin), ferries)
 
 
 def _by_code(findings, code):  # type: ignore[no-untyped-def]
@@ -227,3 +227,13 @@ def test_start_state_rest_does_not_merge_with_the_plans_first_rest() -> None:
     plan = act("REST", 0, 2134, "daily_rest")
     kinds = [r.kind for r in recognise_rests([pre, plan], Regs(), SW)]
     assert kinds == ["weekly_regular", "daily_regular"]
+
+
+def test_regular_weekly_rest_interrupted_only_on_a_long_ferry_with_cabin() -> None:
+    """Art 9(1): a regular weekly rest may be interrupted on a 8 h+ crossing with a cabin."""
+    rest_ = [act("REST", 0, 2800, "weekly_rest", at="F", interruptions=(30,))]
+    code = "INTERRUPTION_NOT_ALLOWED"
+    assert _by_code(_rest_findings(rest_, ferries={"F": (600, True)}), code) == []
+    assert _by_code(_rest_findings(rest_, ferries={"F": (600, False)}), code)
+    assert _by_code(_rest_findings(rest_, ferries={"F": (400, True)}), code)
+    assert _by_code(_rest_findings(rest_), code)

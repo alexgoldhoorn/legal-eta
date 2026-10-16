@@ -39,6 +39,7 @@ class Regs:
     # Art 9
     ferry_interruptions_max: int = 2
     ferry_interruption_total: int = 60
+    ferry_weekly_rest_min_crossing: int = 480  # Art 9(1): regular weekly rest, 8 h or more, cabin
 
 
 def regs_from_effective(effective: dict[str, Any]) -> tuple[Regs, list[Finding]]:

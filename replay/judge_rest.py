@@ -6,6 +6,7 @@ never by the label a block carries. Everything is a single pass over the merged 
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from replay.regs import Regs
@@ -28,6 +29,7 @@ class _Merged:
     in_vehicle: bool
     prehistory: bool
     weekly_label: bool = False
+    at: str | None = None
 
     @property
     def effective(self) -> int:
@@ -48,9 +50,18 @@ def _merge(acts: list[Activity]) -> list[_Merged]:
             m.in_vehicle = m.in_vehicle or a.label.in_vehicle
             m.prehistory = m.prehistory and pre
             m.weekly_label = m.weekly_label or weekly
+            m.at = m.at or a.label.at
         else:
             out.append(
-                _Merged(a.start, a.end, a.label.interruptions, a.label.in_vehicle, pre, weekly)
+                _Merged(
+                    a.start,
+                    a.end,
+                    a.label.interruptions,
+                    a.label.in_vehicle,
+                    pre,
+                    weekly,
+                    a.label.at,
+                )
             )
     return out
 
@@ -64,7 +75,9 @@ def recognise_rests(
     pending: _Merged | None = None
 
     def add(m: _Merged, kind) -> None:  # type: ignore[no-untyped-def]
-        rests.append(RestPeriod(m.start, m.end, kind, m.interruptions, m.in_vehicle, m.prehistory))
+        rests.append(
+            RestPeriod(m.start, m.end, kind, m.interruptions, m.in_vehicle, m.prehistory, m.at)
+        )
 
     for m in _merge(acts):
         e = m.effective
@@ -111,8 +124,9 @@ def check_rests(
     sw: Switches,
     counters: StartCounters,
     weeks: Weeks,
+    ferries: Mapping[str, tuple[int, bool]] | None = None,
 ) -> list[Finding]:
-    return walk_rests(acts, rests, regs, sw, counters, weeks)[0]
+    return walk_rests(acts, rests, regs, sw, counters, weeks, ferries)[0]
 
 
 def walk_rests(  # noqa: C901
@@ -122,6 +136,7 @@ def walk_rests(  # noqa: C901
     sw: Switches,
     counters: StartCounters,
     weeks: Weeks,
+    ferries: Mapping[str, tuple[int, bool]] | None = None,
 ) -> tuple[list[Finding], RestEnd]:
     out: list[Finding] = []
     log_end = acts[-1].end if acts else 0
@@ -221,7 +236,12 @@ def walk_rests(  # noqa: C901
             elif r.kind == "daily_regular":
                 cap = e - regs.daily_rest_regular
         if r.interruptions:
-            ok = r.kind in ("daily_regular", "weekly_reduced")
+            crossing, cabin = (ferries or {}).get(r.at or "", (0, False))
+            ok = r.kind in ("daily_regular", "weekly_reduced") or (
+                r.kind == "weekly_regular"
+                and cabin
+                and crossing >= regs.ferry_weekly_rest_min_crossing
+            )
             if not ok:
                 out.append(
                     _v(

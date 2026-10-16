@@ -29,7 +29,12 @@ def _pipeline(request: dict, response: dict, sw: Switches) -> tuple[list[Finding
     regs, f_regs = regs_from_effective((response.get("rules") or {}).get("effective") or {})
     log, f_log = build_log(request, response, sw)
     prehist, counters, f_start = prehistory(request, regs, sw)
-    f_judge, dend, rend = judge_walk(log, prehist, counters, regs, sw, _week_tz(request))
+    ferries = {
+        i["id"]: (i["minutes"], bool(i.get("sleeper_cabin")))
+        for i in request["route"]
+        if i["kind"] == "ferry"
+    }
+    f_judge, dend, rend = judge_walk(log, prehist, counters, regs, sw, _week_tz(request), ferries)
     f_claims, checked = check_claims(request, response, log, counters, regs, sw, dend, rend)
     return [*f_regs, *f_log, *f_start, *f_judge, *f_claims], checked
 
