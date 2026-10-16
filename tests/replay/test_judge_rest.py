@@ -54,8 +54,11 @@ def test_label_is_not_trusted() -> None:
 def test_weekly_regular_45h() -> None:
     """Art 4(h): a weekly rest of 45 h is regular, 24 h up to 45 h is reduced (Art 8(6))."""
     assert _kinds([act("REST", 0, 2700)]) == ["weekly_regular"]
-    assert _kinds([act("REST", 0, 2699)]) == ["weekly_reduced"]
-    assert _kinds([act("REST", 0, 1440)]) == ["weekly_reduced"]
+    weekly = {"block_kind": "weekly_rest"}
+    assert _kinds([act("REST", 0, 2699, **weekly)]) == ["weekly_reduced"]
+    assert _kinds([act("REST", 0, 1440, **weekly)]) == ["weekly_reduced"]
+    # the plan's label decides the 24 h to 45 h band: called daily, it is judged as a daily rest
+    assert _kinds([act("REST", 0, 2000)]) == ["daily_regular"]
 
 
 def _late(acts, end):  # type: ignore[no-untyped-def]
@@ -65,21 +68,33 @@ def _late(acts, end):  # type: ignore[no-untyped-def]
 def test_reduced_weekly_rest_requires_compensation_in_3_weeks() -> None:
     """Art 8(6b): the reduction must be compensated before the end of the third following week."""
     deadline = weeks().shift(0, 4)  # Monday 00:00 four weeks on; DST makes it 60 min longer
-    unpaid = _late([act("REST", 0, 1440)], deadline + 10)
+    unpaid = _late([act("REST", 0, 1440, block_kind="weekly_rest")], deadline + 10)
     f = _by_code(_rest_findings(unpaid), "COMPENSATION_UNPAID")
     assert [(x.article, x.excess_minutes) for x in f] == [("Art 8(6b)", 1260)]
-    paid = _late([act("REST", 0, 1440), act("REST", 3000, 3000 + 3960)], deadline + 10)
+    paid = _late(
+        [act("REST", 0, 1440, block_kind="weekly_rest"), act("REST", 3000, 3000 + 3960)],
+        deadline + 10,
+    )
     assert _by_code(_rest_findings(paid), "COMPENSATION_UNPAID") == []
-    late = _late([act("REST", 0, 1440), act("REST", 38000, 38000 + 3960)], deadline + 10)
+    late = _late(
+        [act("REST", 0, 1440, block_kind="weekly_rest"), act("REST", 38000, 38000 + 3960)],
+        deadline + 10,
+    )
     assert len(_by_code(_rest_findings(late), "COMPENSATION_UNPAID")) == 1
 
 
 def test_two_consecutive_reduced_weekly_rests_violate() -> None:
     """Art 8(6): two consecutive reduced weekly rests are not allowed."""
-    acts = [act("REST", 0, 1440), act("DRIVE", 1440, 1500), act("REST", 3000, 4440)]
+    acts = [
+        act("REST", 0, 1440, block_kind="weekly_rest"),
+        act("DRIVE", 1440, 1500),
+        act("REST", 3000, 4440, block_kind="weekly_rest"),
+    ]
     f = _by_code(_rest_findings(acts), "CONSECUTIVE_REDUCED_WEEKLY")
     assert [x.article for x in f] == ["Art 8(6)"]
-    prior = _rest_findings([act("REST", 0, 1440)], counters(last_weekly_rest_reduced=True))
+    prior = _rest_findings(
+        [act("REST", 0, 1440, block_kind="weekly_rest")], counters(last_weekly_rest_reduced=True)
+    )
     assert len(_by_code(prior, "CONSECUTIVE_REDUCED_WEEKLY")) == 1
 
 
@@ -131,7 +146,7 @@ def test_art9_interruption_rules() -> None:
     assert _by_code(_rest_findings(reduced), "INTERRUPTION_NOT_ALLOWED")
     weekly_regular = [act("REST", 0, 2800, interruptions=(30,))]
     assert _by_code(_rest_findings(weekly_regular), "INTERRUPTION_NOT_ALLOWED")
-    weekly_reduced = [act("REST", 0, 1500, interruptions=(30,))]
+    weekly_reduced = [act("REST", 0, 1500, "weekly_rest", interruptions=(30,))]
     assert _by_code(_rest_findings(weekly_reduced), "INTERRUPTION_NOT_ALLOWED") == []
 
 

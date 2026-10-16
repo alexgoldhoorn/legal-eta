@@ -10,8 +10,8 @@ MONDAY = datetime(2026, 10, 19, 0, 0, tzinfo=TZ)  # a Monday, before the October
 TUESDAY = datetime(2026, 10, 20, 0, 0, tzinfo=TZ)
 
 
-def act(kind, start: int, end: int, **label) -> Activity:  # type: ignore[no-untyped-def]
-    return Activity(kind, start, end, Label(None, "test", **label))
+def act(kind, start: int, end: int, block_kind: str = "test", **label) -> Activity:  # type: ignore[no-untyped-def]
+    return Activity(kind, start, end, Label(None, block_kind, **label))
 
 
 def rest(start: int, end: int, kind: RestKind, **kw) -> RestPeriod:  # type: ignore[no-untyped-def]
