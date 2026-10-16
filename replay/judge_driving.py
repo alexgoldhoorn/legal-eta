@@ -117,7 +117,7 @@ def _check_daily(
     bounds = sorted(
         (r.end, r.kind.startswith("weekly")) for r in rests if r.kind in _DAILY_BOUNDARY
     )
-    i, seg, seg_start, extended = 0, 0, 0, counters.extended_days_used_this_week
+    i, seg, seg_end, extended = 0, 0, 0, counters.extended_days_used_this_week
     ext_week = weeks.floor(0)
     seg_prior = (
         False  # the segment holds the start state's driving: its extension is already counted
@@ -125,8 +125,8 @@ def _check_daily(
 
     def close(minute: int) -> None:
         nonlocal seg, extended, seg_prior, ext_week
-        if seg and not seg_prior and weeks.floor(seg_start) != ext_week:
-            ext_week, extended = weeks.floor(seg_start), 0
+        if seg and not seg_prior and weeks.floor(seg_end - 1) != ext_week:
+            ext_week, extended = weeks.floor(seg_end - 1), 0
         if seg > regs.daily_driving_extended:
             out.append(
                 Finding(
@@ -158,8 +158,7 @@ def _check_daily(
             close(bounds[i][0])
             i += 1
         if a.kind == "DRIVE":
-            if seg == 0:
-                seg_start = a.start
+            seg_end = a.end
             seg_prior = seg_prior or (a.label.block_index is None and a.start < 0)
             seg += a.minutes
     while i < len(bounds):
@@ -167,7 +166,7 @@ def _check_daily(
         i += 1
     open_today = seg
     if seg:
-        close(seg_start)
+        close(seg_end)
     if ext_week != weeks.floor(acts[-1].end if acts else 0):
         extended = 0
     return out, extended, open_today
