@@ -1,4 +1,4 @@
-# Conformance replayer: design
+# Replay: design (plan replayer)
 
 Date: 2026-10-16. Status: draft for approval. Planning aid, not legal advice.
 
@@ -39,17 +39,21 @@ the replayer as its "did the real day stay legal" oracle.
 - Not a tachograph file parser, and not a replacement for `legaleta validate`.
 - Not legal advice, and no new rules. Out-of-scope items stay out of scope: Art 12, return home, the
   Working Time Directive, the international exception, multi-manning.
-- Anti-goal: a replayer that quietly reuses `state.py`, `rules.py` or `checker.py`. That would make
+- Anti-goal: a replay core that quietly reuses `state.py`, `rules.py` or `checker.py`. That would make
   every pass meaningless, even though it would be shorter to write.
 
 ## Design
 
 ### Placement
 
-A top-level package `conformance/` in the legal-eta repo, **not shipped** in the wheel (the wheel packages
-only `src/legaleta`). Run with `uv run python -m conformance`. It talks to legaleta only through the
-public JSON API (`legaleta.api.plan_json`, or the plan JSON read from a file or stdin), never through
-internals. A test fails if anything in `conformance/` imports another `legaleta` module.
+A top-level package `replay/` in the legal-eta repo, **not shipped** in the wheel (the wheel packages
+only `src/legaleta`). Run with `uv run python -m replay`.
+
+The package has a **core** (activity log, rules, retrospective judge) that imports nothing from
+legaleta, and one **comparator** module (plus the CLI entry point) that may import the public JSON API
+(`legaleta.api.plan_json`, `validate_json`) to obtain plans and run the differential check. The
+comparator never touches internals (`state`, `rules`, `checker`, `scheduler`). A test enforces both
+rules by reading the imports of every file in `replay/`.
 
 ### Two-stage replay
 
@@ -138,7 +142,7 @@ awkward initial driver states, compensation debts); `remaining`-form drivers.
   written by the same person tends to inherit the same blind spots.
 - Both a verdict and a diff report.
 - Waiting counts as rest by default, matching legaleta's documented default, with the switch above.
-- Package name `conformance/`, run as `python -m conformance`.
+- Package name `replay/` (your suggestion), run as `python -m replay`.
 - Replays `plan` output first; `validate` requests are accepted as a second input form but are not the
   focus of version one.
 
