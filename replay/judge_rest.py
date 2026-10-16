@@ -41,7 +41,7 @@ def _merge(acts: list[Activity]) -> list[_Merged]:
             continue  # a ferry without a cabin counts as a break (Art 7) only, never as a rest
         pre = a.label.subtype == PREHISTORY_REST
         weekly = a.label.block_kind == "weekly_rest" or (pre and a.minutes >= 1440)
-        if out and out[-1].end == a.start:
+        if out and out[-1].end == a.start and out[-1].prehistory == pre:
             m = out[-1]
             m.end = a.end
             m.interruptions += a.label.interruptions
@@ -68,7 +68,7 @@ def recognise_rests(
 
     for m in _merge(acts):
         e = m.effective
-        if e >= regs.weekly_rest_regular or (e >= regs.weekly_rest_reduced and m.weekly_label):
+        if e >= regs.weekly_rest_reduced and m.weekly_label:
             add(m, "weekly_regular" if e >= regs.weekly_rest_regular else "weekly_reduced")
             ps, pending = m.end, None
         elif e >= regs.daily_rest_regular:

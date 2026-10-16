@@ -83,11 +83,14 @@ def _raw_driver(rng: random.Random, start: datetime) -> dict[str, Any]:
 
 
 def _remaining_driver(rng: random.Random) -> dict[str, Any]:
+    today = rng.randint(0, 600)
+    this_week = rng.randint(today, 3360)
+    last_week = rng.randint(0, 5400 - this_week)
     return {
         "remaining_drive_before_break": rng.randint(0, 270),
-        "remaining_drive_today": rng.randint(-60, 540),
-        "remaining_drive_this_week": rng.randint(0, 3360),
-        "remaining_drive_fortnight": rng.randint(0, 5400),
+        "remaining_drive_today": 540 - today,
+        "remaining_drive_this_week": 3360 - this_week,
+        "remaining_drive_fortnight": 5400 - this_week - last_week,
         "daily_rest_due_in": rng.randint(60, 1440),
         "weekly_rest_due_in": rng.randint(500, 8640),
     }
