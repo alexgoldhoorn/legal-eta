@@ -53,6 +53,8 @@ class RestPeriod:
     end: int
     kind: RestKind
     interruptions: tuple[int, ...] = ()
+    in_vehicle: bool = False
+    prehistory: bool = False
 
 
 @dataclass(frozen=True)
@@ -71,3 +73,4 @@ class Switches:
     wait_counts_as_rest: bool = True
     overdue_start_restarts_period: bool = True
     window_reduced: bool = True
+    compensation_en_bloc: bool = True
