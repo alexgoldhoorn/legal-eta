@@ -66,8 +66,8 @@ def _check_breaks(acts: list[Activity], regs: Regs) -> tuple[list[Finding], int,
         nonlocal driven, pending_first, run, reported
         if run >= regs.break_full or (run >= regs.break_split_second and pending_first):
             driven, pending_first, reported = 0, False, False
-        elif run >= regs.break_split_first:
-            pending_first = True
+        elif run >= regs.break_split_first and driven > 0:
+            pending_first = True  # a first part only counts once driving has begun (Art 7)
         run = 0
 
     for a in acts:

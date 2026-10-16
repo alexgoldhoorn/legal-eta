@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import fields, replace
 from datetime import datetime, tzinfo
 from zoneinfo import ZoneInfo
@@ -39,8 +40,8 @@ def _pipeline(request: dict, response: dict, sw: Switches) -> tuple[list[Finding
     return [*f_regs, *f_log, *f_start, *f_judge, *f_claims], checked
 
 
-def _key(f: Finding) -> tuple[str, str | None, int | None]:
-    return f.code, f.article, f.minute
+def _key(f: Finding) -> tuple[str, str | None]:
+    return f.code, f.article
 
 
 def replay_plan(
@@ -54,11 +55,15 @@ def replay_plan(
         flipped = []
         for fld in fields(sw):
             alt = replace(sw, **{fld.name: not getattr(sw, fld.name)})
-            keys = {_key(f) for f in _pipeline(request, response, alt)[0]}
-            flipped.append((fld.name, keys))
+            counts = Counter(_key(f) for f in _pipeline(request, response, alt)[0])
+            flipped.append((fld.name, counts))
+        seen: Counter[tuple[str, str | None]] = Counter()
         reclassified = []
         for f in findings:
-            name = next((n for n, keys in flipped if _key(f) not in keys), None)
+            nth = seen[_key(f)]
+            seen[_key(f)] += 1
+            # a finding that is gone (fewer of its kind) under the other reading is interpretation
+            name = next((n for n, counts in flipped if counts[_key(f)] <= nth), None)
             if f.cls in _NEUTRAL or name is None:
                 reclassified.append(f)
             else:

@@ -268,3 +268,9 @@ def test_daily_rest_carrying_compensation_counts_as_reduced() -> None:
     rests = recognise_rests(acts, Regs(), SW, 0)
     _, end = walk_rests(acts, rests, Regs(), SW, plain, weeks())
     assert end.reduced_used == 1 and end.owed == 0
+
+
+def test_weekly_rest_does_not_merge_with_the_daily_rest_after_it() -> None:
+    """A labelled weekly rest ends where the plan says; the daily rest after it is its own."""
+    acts = [act("REST", 0, 2700, "weekly_rest"), act("REST", 2700, 3360, "daily_rest")]
+    assert _kinds(acts) == ["weekly_regular", "daily_regular"]

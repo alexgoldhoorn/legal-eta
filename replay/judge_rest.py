@@ -43,7 +43,12 @@ def _merge(acts: list[Activity]) -> list[_Merged]:
             continue  # a ferry without a cabin counts as a break (Art 7) only, never as a rest
         pre = a.label.subtype == PREHISTORY_REST
         weekly = a.label.block_kind == "weekly_rest" or (pre and a.minutes >= 1440)
-        if out and out[-1].end == a.start and out[-1].prehistory == pre:
+        if (
+            out
+            and out[-1].end == a.start
+            and out[-1].prehistory == pre
+            and out[-1].weekly_label == weekly
+        ):
             m = out[-1]
             m.end = a.end
             m.interruptions += a.label.interruptions
