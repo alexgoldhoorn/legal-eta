@@ -75,6 +75,7 @@ def build_log(
             counts_as_rest=bool(b.get("counts_as_rest")),
             interruptions=tuple(b.get("interruptions") or ()),
             in_vehicle=bool(b.get("in_vehicle")),
+            compensation_minutes=int(b.get("compensation_minutes") or 0),
         )
         log.activities.append(Activity(_kind(b, sw), start, end, label))
         prev_end = end

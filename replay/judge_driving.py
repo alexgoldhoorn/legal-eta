@@ -120,13 +120,12 @@ def _check_daily(
     i, seg, seg_end, extended = 0, 0, 0, counters.extended_days_used_this_week
     ext_minute = 0  # the minute the day's driving first passed the 9 h cap
     ext_week = weeks.floor(0)
-    seg_prior = (
-        False  # the segment holds the start state's driving: its extension is already counted
-    )
+    seg_pre = 0  # minutes of the segment that come from the start state
 
     def close(minute: int) -> None:
-        nonlocal seg, extended, seg_prior, ext_week
-        if seg > regs.daily_driving and not seg_prior and weeks.floor(ext_minute) != ext_week:
+        nonlocal seg, extended, seg_pre, ext_week
+        counted = seg_pre > regs.daily_driving  # the start state already used this extension
+        if seg > regs.daily_driving and not counted and weeks.floor(ext_minute) != ext_week:
             ext_week, extended = weeks.floor(ext_minute), 0
         if seg > regs.daily_driving_extended:
             out.append(
@@ -139,7 +138,7 @@ def _check_daily(
                     excess_minutes=seg - regs.daily_driving_extended,
                 )
             )
-        elif seg > regs.daily_driving and not seg_prior:
+        elif seg > regs.daily_driving and not counted:
             extended += 1
             if extended > regs.extended_days_per_week:
                 out.append(
@@ -152,7 +151,7 @@ def _check_daily(
                         excess_minutes=seg - regs.daily_driving,
                     )
                 )
-        seg, seg_prior = 0, False
+        seg, seg_pre = 0, 0
 
     for a in acts:
         while i < len(bounds) and bounds[i][0] <= a.start:
@@ -162,7 +161,8 @@ def _check_daily(
             seg_end = a.end
             if seg <= regs.daily_driving < seg + a.minutes:
                 ext_minute = a.start + (regs.daily_driving - seg)
-            seg_prior = seg_prior or (a.label.block_index is None and a.start < 0)
+            if a.label.block_index is None and a.start < 0:
+                seg_pre += a.minutes
             seg += a.minutes
     while i < len(bounds):
         close(bounds[i][0])

@@ -44,6 +44,9 @@ def _key(f: Finding) -> tuple[str, str | None]:
     return f.code, f.article
 
 
+_WARNING_CLASSES = ("MISSING_WARNING", "SPURIOUS_WARNING")
+
+
 def replay_plan(
     request: dict,  # type: ignore[type-arg]
     response: dict,  # type: ignore[type-arg]
@@ -51,24 +54,56 @@ def replay_plan(
     reclassify: bool = True,
 ) -> Report:
     findings, checked = _pipeline(request, response, sw)
-    if reclassify and any(f.cls not in _NEUTRAL for f in findings):
-        flipped = []
-        for fld in fields(sw):
-            alt = replace(sw, **{fld.name: not getattr(sw, fld.name)})
-            counts = Counter(_key(f) for f in _pipeline(request, response, alt)[0])
-            flipped.append((fld.name, counts))
-        seen: Counter[tuple[str, str | None]] = Counter()
-        reclassified = []
-        for f in findings:
-            nth = seen[_key(f)]
-            seen[_key(f)] += 1
-            # a finding that is gone (fewer of its kind) under the other reading is interpretation
-            name = next((n for n, counts in flipped if counts[_key(f)] <= nth), None)
-            if f.cls in _NEUTRAL or name is None:
-                reclassified.append(f)
-            else:
-                reclassified.append(
-                    replace(f, cls="INTERPRETATION", message=f"[switch {name}] {f.message}")
-                )
-        findings = reclassified
+    if reclassify:
+        findings = _with_interpretations(request, response, sw, findings)
     return Report(findings, checked, datetime.fromisoformat(request["start"]))
+
+
+def _with_interpretations(
+    request: dict,  # type: ignore[type-arg]
+    response: dict,  # type: ignore[type-arg]
+    sw: Switches,
+    findings: list[Finding],
+) -> list[Finding]:
+    """Re-run under each switch flipped once.
+
+    A finding that is gone under the other reading becomes INTERPRETATION (a missing or spurious
+    warning never does: the assumption must be disclosed whatever its reading). A PASS that would
+    fail under the other reading gets one INTERPRETATION note per switch and finding code, so a
+    pass that rests on an assumption says so.
+    """
+    flips = []
+    for fld in fields(sw):
+        alt = replace(sw, **{fld.name: not getattr(sw, fld.name)})
+        alt_findings = _pipeline(request, response, alt)[0]
+        flips.append((fld.name, Counter(_key(f) for f in alt_findings), alt_findings))
+    seen: Counter[tuple[str, str | None]] = Counter()
+    out: list[Finding] = []
+    for f in findings:
+        nth = seen[_key(f)]
+        seen[_key(f)] += 1
+        name = next((n for n, counts, _ in flips if counts[_key(f)] <= nth), None)
+        if f.cls in _NEUTRAL or f.cls in _WARNING_CLASSES or name is None:
+            out.append(f)
+        else:
+            out.append(replace(f, cls="INTERPRETATION", message=f"[switch {name}] {f.message}"))
+    base = Counter(_key(f) for f in findings)
+    for name, counts, alt_findings in flips:
+        noted: set[tuple[str, str | None]] = set()
+        for f in alt_findings:
+            key = _key(f)
+            if (
+                f.cls in ("VIOLATION", "CLAIM_MISMATCH")
+                and counts[key] > base[key]
+                and key not in noted
+            ):
+                noted.add(key)
+                out.append(
+                    Finding(
+                        "INTERPRETATION",
+                        "STRICTER_READING",
+                        f"[switch {name} flipped] the plan would fail with {f.code}: {f.message}",
+                        f.article,
+                    )
+                )
+    return out

@@ -29,10 +29,10 @@ check. A test enforces this.
 | `VIOLATION` | The executed log breaks an article: a bug in legaleta or in the replay. |
 | `CLAIM_MISMATCH` | The plan says something the replay does not reproduce. |
 | `MISSING_WARNING`, `SPURIOUS_WARNING` | A documented warning that must (or must not) be there. |
-| `INTERPRETATION` | Goes away under another documented reading (`WAIT_ASSUMED_REST`, the Guidance Note 7 restart, the Art 8(2) window rule, en-bloc compensation). Does not fail the run. |
+| `INTERPRETATION` | Goes away under another documented reading (`WAIT_ASSUMED_REST`, the Guidance Note 7 restart, the Art 8(2) window rule). Does not fail the run. |
 | `NON_STANDARD_RULES` | The plan used overridden rule constants. Does not fail the run. |
 
-`PASS` means no finding other than the last two. A row is `SKIP` when legaleta rejects the request or the
+`PASS` means no finding other than the last two. A PASS can carry `INTERPRETATION` notes (`STRICTER_READING`): the plan would fail under the other reading of a documented assumption. A row is `SKIP` when legaleta rejects the request or the
 start state cannot be laid out as a prior log.
 
 ## Commands

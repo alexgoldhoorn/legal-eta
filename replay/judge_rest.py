@@ -30,6 +30,7 @@ class _Merged:
     prehistory: bool
     weekly_label: bool = False
     at: str | None = None
+    declared_compensation: int = 0
 
     @property
     def effective(self) -> int:
@@ -56,6 +57,7 @@ def _merge(acts: list[Activity]) -> list[_Merged]:
             m.prehistory = m.prehistory and pre
             m.weekly_label = m.weekly_label or weekly
             m.at = m.at or a.label.at
+            m.declared_compensation += a.label.compensation_minutes
         else:
             out.append(
                 _Merged(
@@ -66,6 +68,7 @@ def _merge(acts: list[Activity]) -> list[_Merged]:
                     pre,
                     weekly,
                     a.label.at,
+                    a.label.compensation_minutes,
                 )
             )
     return out
@@ -81,7 +84,16 @@ def recognise_rests(
 
     def add(m: _Merged, kind) -> None:  # type: ignore[no-untyped-def]
         rests.append(
-            RestPeriod(m.start, m.end, kind, m.interruptions, m.in_vehicle, m.prehistory, m.at)
+            RestPeriod(
+                m.start,
+                m.end,
+                kind,
+                m.interruptions,
+                m.in_vehicle,
+                m.prehistory,
+                m.at,
+                m.declared_compensation,
+            )
         )
 
     for m in _merge(acts):
@@ -162,19 +174,37 @@ def walk_rests(  # noqa: C901
     prev_weekly_reduced = counters.last_weekly_rest_reduced
     reduced_used = counters.reduced_daily_rests_used
     debts: list[_Debt] = []
+    owed_declared = counters.compensation_owed  # the plan's own ledger, for the end-state claim
     if counters.compensation_owed > 0:
         debts.append(_Debt(counters.compensation_owed, counters.compensation_deadline))
-    split_start: int | None = None
+    split_part: tuple[int, int] | None = None
 
     for r in rests:
         e = r.end - r.start - sum(r.interruptions)
         if r.kind == "daily_split_1":
-            split_start = r.start
+            split_part = (r.start, r.end)
             continue
         if r.prehistory:
             ps = last_daily_end = r.end
             continue
         cap = 0
+        parts = [(r.start, r.end)]
+        if r.kind == "daily_split_2" and split_part is not None:
+            parts.append(split_part)
+        split_part = None
+        inside = sum(max(0, min(b, ps + regs.daily_window) - max(a, ps)) for a, b in parts)
+        if free_first:
+            free_first = False
+        elif inside < regs.daily_rest_reduced:
+            out.append(
+                _v(
+                    "DAILY_REST_LATE",
+                    "Art 8(2)",
+                    f"only {inside} min of the rest fall inside its 24 h period (9 h needed)",
+                    r.start,
+                    regs.daily_rest_reduced - inside,
+                )
+            )
         if r.kind.startswith("weekly"):
             deadline = wre + regs.weekly_rest_deadline
             if r.start > deadline:
@@ -199,6 +229,7 @@ def walk_rests(  # noqa: C901
                     )
                 due = weeks.shift(weeks.floor(r.start), regs.compensation_deadline_weeks + 1)
                 debts.append(_Debt(regs.weekly_rest_regular - e, due))
+                owed_declared += regs.weekly_rest_regular - e
             else:
                 cap = e - regs.weekly_rest_regular
                 if r.in_vehicle:
@@ -211,26 +242,8 @@ def walk_rests(  # noqa: C901
                         )
                     )
             prev_weekly_reduced = r.kind == "weekly_reduced"
-            wre, reduced_used, free_first = r.end, 0, False
+            wre, reduced_used = r.end, 0
         else:
-            start = (
-                split_start if (r.kind == "daily_split_2" and split_start is not None) else r.start
-            )
-            split_start = None
-            if free_first:
-                free_first = False
-            else:
-                latest = ps + regs.daily_window - regs.daily_rest_reduced
-                if start > latest:
-                    out.append(
-                        _v(
-                            "DAILY_REST_LATE",
-                            "Art 8(2)",
-                            "daily rest started too late for its 24 h period",
-                            start,
-                            start - latest,
-                        )
-                    )
             if r.kind == "daily_reduced":
                 reduced_used += 1
                 if reduced_used > regs.reduced_daily_rests_between_weekly:
@@ -247,17 +260,24 @@ def walk_rests(  # noqa: C901
             cap = e - regs.daily_rest_reduced  # Art 8(6b): attached to a rest of at least 9 h
         if r.interruptions:
             crossing, cabin = (ferries or {}).get(r.at or "", (0, False))
-            ok = r.kind in ("daily_regular", "weekly_reduced") or (
-                r.kind == "weekly_regular"
-                and cabin
-                and crossing >= regs.ferry_weekly_rest_min_crossing
+            kind_ok = r.kind in ("daily_regular", "weekly_reduced") or (
+                r.kind == "weekly_regular" and crossing >= regs.ferry_weekly_rest_min_crossing
             )
-            if not ok:
+            if not kind_ok:
                 out.append(
                     _v(
                         "INTERRUPTION_NOT_ALLOWED",
                         "Art 9(1)",
                         f"a {r.kind} rest may not be interrupted",
+                        r.start,
+                    )
+                )
+            elif not cabin:
+                out.append(
+                    _v(
+                        "INTERRUPTION_NO_CABIN",
+                        "Art 9(1)",
+                        "an interrupted rest needs a sleeper cabin, bunk or couchette",
                         r.start,
                     )
                 )
@@ -282,18 +302,20 @@ def walk_rests(  # noqa: C901
                     )
                 )
         ps = last_daily_end = r.end
+        owed_declared = max(0, owed_declared - r.declared_compensation)
         paid = 0
         for d in sorted(debts, key=lambda d: (d.due is None, d.due or 0)):
             if cap <= 0:
                 break
             if d.due is not None and r.end > d.due:
                 continue
-            pay = d.amount if cap >= d.amount else (0 if sw.compensation_en_bloc else cap)
+            pay = d.amount if cap >= d.amount else 0  # Art 8(6b): en bloc, never in parts
             d.amount -= pay
             cap -= pay
             paid += pay
         debts = [d for d in debts if d.amount > 0]
-        if r.kind == "daily_regular" and paid and e - paid < regs.daily_rest_regular:
+        declared = r.declared_compensation
+        if r.kind == "daily_regular" and declared and e - declared < regs.daily_rest_regular:
             reduced_used += 1  # a 9 h rest plus the debt it carries is a reduced daily rest
             if reduced_used > regs.reduced_daily_rests_between_weekly:
                 out.append(
@@ -344,7 +366,7 @@ def walk_rests(  # noqa: C901
         wre,
         prev_weekly_reduced,
         reduced_used,
-        sum(d.amount for d in debts),
+        owed_declared,
         min(dues) if dues else None,
     )
     return out, end

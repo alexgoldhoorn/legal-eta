@@ -1,0 +1,892 @@
+{
+ "seed": 317,
+ "request": {
+  "start": "2026-10-20T04:30:00+02:00",
+  "route": [
+   {
+    "kind": "ferry",
+    "id": "f0",
+    "minutes": 265,
+    "sleeper_cabin": true,
+    "boarding_minutes": 30
+   },
+   {
+    "kind": "drive",
+    "minutes": 388
+   },
+   {
+    "kind": "stop",
+    "id": "s2",
+    "service_minutes": 60
+   },
+   {
+    "kind": "drive",
+    "minutes": 13
+   },
+   {
+    "kind": "drive",
+    "minutes": 248
+   },
+   {
+    "kind": "stop",
+    "id": "s5",
+    "service_minutes": 30,
+    "driver_works": false,
+    "window": {
+     "earliest": "2026-10-22T22:27:00+02:00",
+     "latest": "2026-10-23T03:59:00+02:00"
+    }
+   },
+   {
+    "kind": "drive",
+    "minutes": 101
+   },
+   {
+    "kind": "drive",
+    "minutes": 84
+   },
+   {
+    "kind": "drive",
+    "minutes": 769
+   },
+   {
+    "kind": "drive",
+    "minutes": 140
+   },
+   {
+    "kind": "stop",
+    "id": "s10",
+    "service_minutes": 60
+   },
+   {
+    "kind": "stop",
+    "id": "s11",
+    "service_minutes": 0,
+    "window": {
+     "earliest": "2026-10-22T21:32:00+02:00",
+     "latest": "2026-10-23T06:09:00+02:00"
+    }
+   },
+   {
+    "kind": "stop",
+    "id": "s12",
+    "service_minutes": 120,
+    "window": {
+     "earliest": "2026-10-22T04:47:00+02:00",
+     "latest": "2026-10-22T12:36:00+02:00"
+    },
+    "tags": [
+     "rest"
+    ]
+   },
+   {
+    "kind": "drive",
+    "minutes": 324
+   },
+   {
+    "kind": "drive",
+    "minutes": 506
+   },
+   {
+    "kind": "stop",
+    "id": "s15",
+    "service_minutes": 120
+   },
+   {
+    "kind": "ferry",
+    "id": "f16",
+    "minutes": 712,
+    "sleeper_cabin": false,
+    "boarding_minutes": 0
+   },
+   {
+    "kind": "stop",
+    "id": "s17",
+    "service_minutes": 60,
+    "rest_allowed": false
+   },
+   {
+    "kind": "drive",
+    "minutes": 76
+   },
+   {
+    "kind": "drive",
+    "minutes": 44
+   },
+   {
+    "kind": "stop",
+    "id": "s20",
+    "service_minutes": 120
+   },
+   {
+    "kind": "drive",
+    "minutes": 80
+   },
+   {
+    "kind": "drive",
+    "minutes": 181
+   },
+   {
+    "kind": "drive",
+    "minutes": 50
+   },
+   {
+    "kind": "stop",
+    "id": "s24",
+    "service_minutes": 30,
+    "driver_works": false
+   }
+  ],
+  "driver": {
+   "remaining": {
+    "remaining_drive_before_break": 251,
+    "remaining_drive_today": 351,
+    "remaining_drive_this_week": 1078,
+    "remaining_drive_fortnight": 1978,
+    "daily_rest_due_in": 745,
+    "weekly_rest_due_in": 7731
+   }
+  }
+ },
+ "response": {
+  "arrival": "2026-10-30T03:28:00+02:00",
+  "blocks": [
+   {
+    "kind": "daily_rest",
+    "start": "2026-10-20T04:30:00+02:00",
+    "end": "2026-10-20T16:00:00+02:00",
+    "minutes": 690,
+    "at": "f0",
+    "subtype": "regular",
+    "reason": "regular daily rest of 11 h starting at the port and continuing on ferry f0, interrupted by boarding for 30 min (Art 9(1))",
+    "article": "Art 8(2); Art 4(g); Art 9(1)",
+    "counts_as_rest": false,
+    "interruptions": [
+     30
+    ],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "drive",
+    "start": "2026-10-20T16:00:00+02:00",
+    "end": "2026-10-20T20:30:00+02:00",
+    "minutes": 270,
+    "at": null,
+    "subtype": null,
+    "reason": "drive until the 4.5 h break is due (Art 7)",
+    "article": "Art 6; Art 7",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "daily_rest",
+    "start": "2026-10-20T20:30:00+02:00",
+    "end": "2026-10-21T07:30:00+02:00",
+    "minutes": 660,
+    "at": null,
+    "subtype": "regular",
+    "reason": "regular daily rest of 11 h at the roadside",
+    "article": "Art 8(2); Art 4(g)",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "drive",
+    "start": "2026-10-21T07:30:00+02:00",
+    "end": "2026-10-21T09:28:00+02:00",
+    "minutes": 118,
+    "at": null,
+    "subtype": null,
+    "reason": "drive to the next route item",
+    "article": "Art 6; Art 7",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "work",
+    "start": "2026-10-21T09:28:00+02:00",
+    "end": "2026-10-21T10:28:00+02:00",
+    "minutes": 60,
+    "at": "s2",
+    "subtype": null,
+    "reason": "service at s2 (driver works)",
+    "article": "Art 4(e)",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "break",
+    "start": "2026-10-21T10:28:00+02:00",
+    "end": "2026-10-21T11:13:00+02:00",
+    "minutes": 45,
+    "at": "s2",
+    "subtype": "regular",
+    "reason": "45 min break at s2 (break due within 60 min of driving after this stop)",
+    "article": "Art 7",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "drive",
+    "start": "2026-10-21T11:13:00+02:00",
+    "end": "2026-10-21T15:34:00+02:00",
+    "minutes": 261,
+    "at": null,
+    "subtype": null,
+    "reason": "drive to the next route item",
+    "article": "Art 6; Art 7",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "daily_rest",
+    "start": "2026-10-21T15:34:00+02:00",
+    "end": "2026-10-22T22:27:00+02:00",
+    "minutes": 1853,
+    "at": "s5",
+    "subtype": "regular",
+    "reason": "regular daily rest of 11 h at s5, covering the wait for the window",
+    "article": "Art 8(2); Art 4(g)",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "wait",
+    "start": "2026-10-22T22:27:00+02:00",
+    "end": "2026-10-22T22:57:00+02:00",
+    "minutes": 30,
+    "at": "s5",
+    "subtype": null,
+    "reason": "idle service at s5 (driver does not work)",
+    "article": "Art 4(d)",
+    "counts_as_rest": true,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "drive",
+    "start": "2026-10-22T22:57:00+02:00",
+    "end": "2026-10-23T03:27:00+02:00",
+    "minutes": 270,
+    "at": null,
+    "subtype": null,
+    "reason": "drive until the 4.5 h break is due (Art 7)",
+    "article": "Art 6; Art 7",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "break",
+    "start": "2026-10-23T03:27:00+02:00",
+    "end": "2026-10-23T03:57:00+02:00",
+    "minutes": 30,
+    "at": null,
+    "subtype": "regular",
+    "reason": "30 min second part of a split break (15 min already taken)",
+    "article": "Art 7",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "drive",
+    "start": "2026-10-23T03:57:00+02:00",
+    "end": "2026-10-23T06:36:00+02:00",
+    "minutes": 159,
+    "at": null,
+    "subtype": null,
+    "reason": "drive until the weekly driving limit (Art 6(2))",
+    "article": "Art 6; Art 7",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "weekly_rest",
+    "start": "2026-10-23T06:36:00+02:00",
+    "end": "2026-10-26T00:00:00+02:00",
+    "minutes": 3924,
+    "at": null,
+    "subtype": "regular",
+    "reason": "regular weekly rest of 45 h at the roadside until the next week starts (weekly driving limits reached)",
+    "article": "Art 8(6); Art 4(h)",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "drive",
+    "start": "2026-10-26T00:00:00+02:00",
+    "end": "2026-10-26T04:30:00+02:00",
+    "minutes": 270,
+    "at": null,
+    "subtype": null,
+    "reason": "drive until the 4.5 h break is due (Art 7)",
+    "article": "Art 6; Art 7",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "break",
+    "start": "2026-10-26T04:30:00+02:00",
+    "end": "2026-10-26T05:15:00+02:00",
+    "minutes": 45,
+    "at": null,
+    "subtype": "regular",
+    "reason": "45 min break after 4.5 h of driving",
+    "article": "Art 7",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "drive",
+    "start": "2026-10-26T05:15:00+02:00",
+    "end": "2026-10-26T09:45:00+02:00",
+    "minutes": 270,
+    "at": null,
+    "subtype": null,
+    "reason": "drive until the 4.5 h break is due (Art 7)",
+    "article": "Art 6; Art 7",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "daily_rest",
+    "start": "2026-10-26T09:45:00+02:00",
+    "end": "2026-10-26T20:45:00+02:00",
+    "minutes": 660,
+    "at": null,
+    "subtype": "regular",
+    "reason": "regular daily rest of 11 h at the roadside",
+    "article": "Art 8(2); Art 4(g)",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "drive",
+    "start": "2026-10-26T20:45:00+02:00",
+    "end": "2026-10-26T22:50:00+02:00",
+    "minutes": 125,
+    "at": null,
+    "subtype": null,
+    "reason": "drive to the next route item",
+    "article": "Art 6; Art 7",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "work",
+    "start": "2026-10-26T22:50:00+02:00",
+    "end": "2026-10-26T23:50:00+02:00",
+    "minutes": 60,
+    "at": "s10",
+    "subtype": null,
+    "reason": "service at s10 (driver works)",
+    "article": "Art 4(e)",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "work",
+    "start": "2026-10-26T23:50:00+02:00",
+    "end": "2026-10-27T01:50:00+02:00",
+    "minutes": 120,
+    "at": "s12",
+    "subtype": null,
+    "reason": "service at s12 (driver works)",
+    "article": "Art 4(e)",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "drive",
+    "start": "2026-10-27T01:50:00+02:00",
+    "end": "2026-10-27T04:15:00+02:00",
+    "minutes": 145,
+    "at": null,
+    "subtype": null,
+    "reason": "drive until the 4.5 h break is due (Art 7)",
+    "article": "Art 6; Art 7",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "break",
+    "start": "2026-10-27T04:15:00+02:00",
+    "end": "2026-10-27T05:00:00+02:00",
+    "minutes": 45,
+    "at": null,
+    "subtype": "regular",
+    "reason": "45 min break after 4.5 h of driving",
+    "article": "Art 7",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "drive",
+    "start": "2026-10-27T05:00:00+02:00",
+    "end": "2026-10-27T09:30:00+02:00",
+    "minutes": 270,
+    "at": null,
+    "subtype": null,
+    "reason": "drive until the 4.5 h break is due (Art 7)",
+    "article": "Art 6; Art 7",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "daily_rest",
+    "start": "2026-10-27T09:30:00+02:00",
+    "end": "2026-10-27T20:30:00+02:00",
+    "minutes": 660,
+    "at": null,
+    "subtype": "regular",
+    "reason": "regular daily rest of 11 h at the roadside",
+    "article": "Art 8(2); Art 4(g)",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "drive",
+    "start": "2026-10-27T20:30:00+02:00",
+    "end": "2026-10-28T01:00:00+02:00",
+    "minutes": 270,
+    "at": null,
+    "subtype": null,
+    "reason": "drive until the 4.5 h break is due (Art 7)",
+    "article": "Art 6; Art 7",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "break",
+    "start": "2026-10-28T01:00:00+02:00",
+    "end": "2026-10-28T01:45:00+02:00",
+    "minutes": 45,
+    "at": null,
+    "subtype": "regular",
+    "reason": "45 min break after 4.5 h of driving",
+    "article": "Art 7",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "drive",
+    "start": "2026-10-28T01:45:00+02:00",
+    "end": "2026-10-28T04:10:00+02:00",
+    "minutes": 145,
+    "at": null,
+    "subtype": null,
+    "reason": "drive to the next route item",
+    "article": "Art 6; Art 7",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "work",
+    "start": "2026-10-28T04:10:00+02:00",
+    "end": "2026-10-28T06:10:00+02:00",
+    "minutes": 120,
+    "at": "s15",
+    "subtype": null,
+    "reason": "service at s15 (driver works)",
+    "article": "Art 4(e)",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "daily_rest",
+    "start": "2026-10-28T06:10:00+02:00",
+    "end": "2026-10-28T17:10:00+02:00",
+    "minutes": 660,
+    "at": null,
+    "subtype": "regular",
+    "reason": "regular daily rest of 11 h at the port before boarding (no later start keeps the next rest legal)",
+    "article": "Art 8(2); Art 4(g)",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "ferry",
+    "start": "2026-10-28T17:10:00+02:00",
+    "end": "2026-10-29T05:02:00+02:00",
+    "minutes": 712,
+    "at": "f16",
+    "subtype": null,
+    "reason": "ferry crossing f16; time on board counts as a break",
+    "article": "Art 7; Art 9(2)",
+    "counts_as_rest": true,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "work",
+    "start": "2026-10-29T05:02:00+02:00",
+    "end": "2026-10-29T06:02:00+02:00",
+    "minutes": 60,
+    "at": "s17",
+    "subtype": null,
+    "reason": "service at s17 (driver works)",
+    "article": "Art 4(e)",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "drive",
+    "start": "2026-10-29T06:02:00+02:00",
+    "end": "2026-10-29T06:10:00+02:00",
+    "minutes": 8,
+    "at": null,
+    "subtype": null,
+    "reason": "drive until the daily rest must start (Art 8(2))",
+    "article": "Art 6; Art 7",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "daily_rest",
+    "start": "2026-10-29T06:10:00+02:00",
+    "end": "2026-10-29T17:10:00+02:00",
+    "minutes": 660,
+    "at": null,
+    "subtype": "regular",
+    "reason": "regular daily rest of 11 h at the roadside",
+    "article": "Art 8(2); Art 4(g)",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "drive",
+    "start": "2026-10-29T17:10:00+02:00",
+    "end": "2026-10-29T19:02:00+02:00",
+    "minutes": 112,
+    "at": null,
+    "subtype": null,
+    "reason": "drive to the next route item",
+    "article": "Art 6; Art 7",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "work",
+    "start": "2026-10-29T19:02:00+02:00",
+    "end": "2026-10-29T21:02:00+02:00",
+    "minutes": 120,
+    "at": "s20",
+    "subtype": null,
+    "reason": "service at s20 (driver works)",
+    "article": "Art 4(e)",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "drive",
+    "start": "2026-10-29T21:02:00+02:00",
+    "end": "2026-10-29T23:40:00+02:00",
+    "minutes": 158,
+    "at": null,
+    "subtype": null,
+    "reason": "drive until the 4.5 h break is due (Art 7)",
+    "article": "Art 6; Art 7",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "break",
+    "start": "2026-10-29T23:40:00+02:00",
+    "end": "2026-10-30T00:25:00+02:00",
+    "minutes": 45,
+    "at": null,
+    "subtype": "regular",
+    "reason": "45 min break after 4.5 h of driving",
+    "article": "Art 7",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "drive",
+    "start": "2026-10-30T00:25:00+02:00",
+    "end": "2026-10-30T02:58:00+02:00",
+    "minutes": 153,
+    "at": null,
+    "subtype": null,
+    "reason": "drive to the next route item",
+    "article": "Art 6; Art 7",
+    "counts_as_rest": false,
+    "interruptions": [],
+    "compensation_minutes": 0
+   },
+   {
+    "kind": "wait",
+    "start": "2026-10-30T02:58:00+02:00",
+    "end": "2026-10-30T03:28:00+02:00",
+    "minutes": 30,
+    "at": "s24",
+    "subtype": null,
+    "reason": "idle service at s24 (driver does not work)",
+    "article": "Art 4(d)",
+    "counts_as_rest": true,
+    "interruptions": [],
+    "compensation_minutes": 0
+   }
+  ],
+  "stops": [
+   {
+    "id": "s2",
+    "arrival": "2026-10-21T09:28:00+02:00",
+    "departure": "2026-10-21T11:13:00+02:00",
+    "lateness_minutes": 0,
+    "window_met": true,
+    "rested_here": false
+   },
+   {
+    "id": "s5",
+    "arrival": "2026-10-21T15:34:00+02:00",
+    "departure": "2026-10-22T22:57:00+02:00",
+    "lateness_minutes": 0,
+    "window_met": true,
+    "rested_here": true
+   },
+   {
+    "id": "s10",
+    "arrival": "2026-10-26T22:50:00+02:00",
+    "departure": "2026-10-26T23:50:00+02:00",
+    "lateness_minutes": 0,
+    "window_met": true,
+    "rested_here": false
+   },
+   {
+    "id": "s11",
+    "arrival": "2026-10-26T23:50:00+02:00",
+    "departure": "2026-10-26T23:50:00+02:00",
+    "lateness_minutes": 5381,
+    "window_met": false,
+    "rested_here": false
+   },
+   {
+    "id": "s12",
+    "arrival": "2026-10-26T23:50:00+02:00",
+    "departure": "2026-10-27T01:50:00+02:00",
+    "lateness_minutes": 6434,
+    "window_met": false,
+    "rested_here": false
+   },
+   {
+    "id": "s15",
+    "arrival": "2026-10-28T04:10:00+02:00",
+    "departure": "2026-10-28T06:10:00+02:00",
+    "lateness_minutes": 0,
+    "window_met": true,
+    "rested_here": false
+   },
+   {
+    "id": "s17",
+    "arrival": "2026-10-29T05:02:00+02:00",
+    "departure": "2026-10-29T06:02:00+02:00",
+    "lateness_minutes": 0,
+    "window_met": true,
+    "rested_here": false
+   },
+   {
+    "id": "s20",
+    "arrival": "2026-10-29T19:02:00+02:00",
+    "departure": "2026-10-29T21:02:00+02:00",
+    "lateness_minutes": 0,
+    "window_met": true,
+    "rested_here": false
+   },
+   {
+    "id": "s24",
+    "arrival": "2026-10-30T02:58:00+02:00",
+    "departure": "2026-10-30T03:28:00+02:00",
+    "lateness_minutes": 0,
+    "window_met": true,
+    "rested_here": false
+   }
+  ],
+  "summary": {
+   "driving": 3004,
+   "break": 255,
+   "daily_rest": 5843,
+   "weekly_rest": 3924,
+   "work": 540,
+   "wait": 60,
+   "ferry": 712,
+   "total": 14338
+  },
+  "driver_state_at_end": {
+   "raw": {
+    "driving_since_break": 153,
+    "split_break_first_part_taken": true,
+    "driving_today": 423,
+    "last_daily_rest_end": "2026-10-29T17:10:00+02:00",
+    "split_daily_rest_first_part_taken": false,
+    "reduced_daily_rests_used": 0,
+    "driving_this_week": 1926,
+    "driving_last_week": 3360,
+    "extended_days_used_this_week": 0,
+    "last_weekly_rest_end": "2026-10-26T00:00:00+02:00",
+    "last_weekly_rest_reduced": false,
+    "compensation_owed_minutes": 0,
+    "compensation_deadline": null
+   },
+   "remaining": {
+    "remaining_drive_before_break": 117,
+    "remaining_drive_today": 117,
+    "remaining_drive_this_week": 1434,
+    "remaining_drive_fortnight": 114,
+    "daily_rest_due_in": 822,
+    "weekly_rest_due_in": 2672,
+    "split_break_first_part_taken": true,
+    "split_daily_rest_first_part_taken": false,
+    "reduced_daily_rests_used": 0,
+    "extended_days_used_this_week": 0,
+    "last_weekly_rest_reduced": false,
+    "compensation_owed_minutes": 0
+   }
+  },
+  "warnings": [
+   {
+    "code": "ART12_NOT_MODELLED",
+    "message": "Art 12 departures (up to +1 h / +2 h to reach base or home for a weekly rest) are not planned; they are the driver's decision on the road.",
+    "article": "Art 12"
+   },
+   {
+    "code": "RETURN_HOME_NOT_CHECKED",
+    "message": "The obligation to let the driver return home or to base every four weeks is not checked.",
+    "article": "Art 8(8a)"
+   },
+   {
+    "code": "WTD_NOT_CHECKED",
+    "message": "Working-time limits of Directive 2002/15/EC are not checked.",
+    "article": "Directive 2002/15/EC"
+   },
+   {
+    "code": "WAIT_ASSUMED_REST",
+    "message": "Idle time at a stop (waiting for a window, or service the driver does not work) was counted as break or rest. Directive 2002/15/EC treats waiting of unknown duration as availability; set policy.wait_counts_as_rest or the stop's counts_as_rest to false to change this.",
+    "article": "Art 4(d); Art 4(f)"
+   },
+   {
+    "code": "REGULAR_WEEKLY_REST_ON_ROAD",
+    "message": "A regular weekly rest was placed between stops. It must not be taken in the vehicle: the driver needs accommodation there.",
+    "article": "Art 8(8)"
+   },
+   {
+    "code": "STATE_FROM_REMAINING",
+    "message": "remaining_drive_today read against the 9 h cap; if the day is already extended to 10 h, pass the raw form",
+    "article": ""
+   }
+  ],
+  "violations": [],
+  "rules": {
+   "preset": "eu561",
+   "overrides": {},
+   "effective": {
+    "break_after_driving": 270,
+    "break_full": 45,
+    "break_split_first": 15,
+    "break_split_second": 30,
+    "daily_driving": 540,
+    "daily_driving_extended": 600,
+    "extended_days_per_week": 2,
+    "weekly_driving": 3360,
+    "fortnight_driving": 5400,
+    "daily_rest_regular": 660,
+    "daily_rest_reduced": 540,
+    "daily_rest_split_first": 180,
+    "daily_rest_split_second": 540,
+    "reduced_daily_rests_between_weekly": 3,
+    "daily_window": 1440,
+    "weekly_rest_regular": 2700,
+    "weekly_rest_reduced": 1440,
+    "weekly_rest_deadline": 8640,
+    "compensation_deadline_weeks": 3,
+    "compensation_attach_min_rest": 540,
+    "regular_weekly_rest_in_vehicle": false,
+    "ferry_interruptions_max": 2,
+    "ferry_interruption_total": 60,
+    "ferry_weekly_rest_min_crossing": 480,
+    "ferry_weekly_rest_needs_cabin": true,
+    "min_break_portion": 15
+   }
+  },
+  "policy": {
+   "preset": "driver_friendly",
+   "overrides": {}
+  },
+  "disclaimer": "Planning aid, not legal advice."
+ },
+ "findings": [
+  {
+   "cls": "VIOLATION",
+   "code": "BREAK_MISSING",
+   "message": "429 min of driving without a qualifying break",
+   "article": "Art 7",
+   "minute": 4287,
+   "block_index": 11,
+   "excess_minutes": 159,
+   "time": "Fri 2026-10-23 03:57"
+  },
+  {
+   "cls": "INTERPRETATION",
+   "code": "STRICTER_READING",
+   "message": "[switch wait_counts_as_rest flipped] the plan would fail with END_RAW_SPLIT_BREAK_FIRST_PART_TAKEN: end state split_break_first_part_taken: plan says True, replay measured False",
+   "article": null,
+   "minute": null,
+   "block_index": null,
+   "excess_minutes": 0,
+   "time": "-"
+  },
+  {
+   "cls": "INTERPRETATION",
+   "code": "STRICTER_READING",
+   "message": "[switch wait_counts_as_rest flipped] the plan would fail with END_REMAINING_SPLIT_BREAK_FIRST_PART_TAKEN: end state split_break_first_part_taken: plan says True, replay measured False",
+   "article": null,
+   "minute": null,
+   "block_index": null,
+   "excess_minutes": 0,
+   "time": "-"
+  },
+  {
+   "cls": "CLAIM_MISMATCH",
+   "code": "VALIDATE_DISAGREES",
+   "message": "legaleta validate says legal, the replay says illegal",
+   "article": null,
+   "minute": null,
+   "block_index": null,
+   "excess_minutes": 0,
+   "time": "-"
+  }
+ ]
+}

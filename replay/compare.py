@@ -116,7 +116,9 @@ def run_requests(
                 out.append(Result(name, policy, "SKIP", report, detail, response, req))
                 continue
             report.findings.extend(differential(req, response, report))
-            out.append(Result(name, policy, report.verdict, report, "", response, req))
+            notes = sum(f.cls == "INTERPRETATION" for f in report.findings)
+            detail = f"({notes} interpretation notes)" if notes else ""
+            out.append(Result(name, policy, report.verdict, report, detail, response, req))
     return out
 
 

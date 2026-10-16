@@ -32,7 +32,8 @@ after driving began, so the replay reads 270 + 270 min of driving with only a 30
   `BREAK_MISSING Art 7 (+270 min)`.
 - `legaleta validate` called on the very same blocks says the plan is **legal**, so the checker and the
   scheduler share the blind spot (the differential check reports `VALIDATE_DISAGREES`).
-- Fuzz cases: `replay/corpus/seed12_*`, `seed24_*` (same cause).
+- Fuzz cases: `replay/corpus/seed12_*`, `seed24_*`, `seed201_*`, `seed317_*` (same cause; seed 317 is a 30 min
+  idle block right after a 19 h rest, then a 30 min break after 270 min of driving).
 - Related, same root: the end state after a long rest followed by a 15 min idle block reports
   `split_break_first_part_taken: true` (`replay/corpus/seed40_*`). The state machine treats
   contiguous rest blocks one at a time instead of as one rest.
@@ -53,13 +54,22 @@ Kept so the same mistakes are not made twice. Each now has a test.
 - The 24 h window rule ran against a period that had already lapsed before the start (Guidance Note 7).
 - Compensation attaches to a rest of at least 9 h (Art 8(7)), and a 9 h rest that carries it is a
   reduced daily rest (Art 8(4)).
+- Found by the final review: a weekly rest was not checked against the 24 h period (Art 8(2)); a split daily
+  rest was judged from the start of its first part and its 9 h part could run past the period; a 10 h day
+  was not counted when the start state held only part of it; a missing `WAIT_ASSUMED_REST` warning was
+  excused by flipping the assumption; an interrupted rest did not need a cabin; a partial-payment
+  reading of compensation was offered as a switch although Art 8(6b) says "en bloc".
 - Art 9(1): a regular weekly rest can be interrupted on a ferry or train journey of 8 h or more with a
   cabin; legaleta already models this.
 
 ## Not findings, but read before trusting a PASS
 
-- A PASS can contain `INTERPRETATION` findings: legal only under a documented assumption
-  (`WAIT_ASSUMED_REST`, the Guidance Note 7 restart, the Art 8(2) window rule, en-bloc compensation).
-  Run `python -m replay run ... --json` to see them.
+- A PASS can contain `INTERPRETATION` notes: the plan is legal only under a documented assumption
+  (`WAIT_ASSUMED_REST`, the Guidance Note 7 restart, the Art 8(2) window rule). The replay re-runs every
+  plan under each switch flipped once and adds one `STRICTER_READING` note per switch and finding code.
+  `python -m replay run` prints the number of notes on each row; `--json` lists them.
+- Compensation has two ledgers. Legality credits any rest long enough to carry the debt (intent cannot
+  be read from a tachograph); the end-state `compensation_owed_minutes` and the reduced-rest count use
+  the plan's own declared `compensation_minutes`, so that claim is checked against the plan's blocks.
 - The replay lays the driver's start state out as a prior log. A state it cannot lay out is reported as
   a skipped row, not as a pass.

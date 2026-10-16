@@ -234,7 +234,10 @@ def test_regular_weekly_rest_interrupted_only_on_a_long_ferry_with_cabin() -> No
     rest_ = [act("REST", 0, 2800, "weekly_rest", at="F", interruptions=(30,))]
     code = "INTERRUPTION_NOT_ALLOWED"
     assert _by_code(_rest_findings(rest_, ferries={"F": (600, True)}), code) == []
-    assert _by_code(_rest_findings(rest_, ferries={"F": (600, False)}), code)
+    assert _by_code(
+        _rest_findings(rest_, ferries={"F": (600, False)}),
+        "INTERRUPTION_NO_CABIN",
+    )
     assert _by_code(_rest_findings(rest_, ferries={"F": (400, True)}), code)
     assert _by_code(_rest_findings(rest_), code)
 
@@ -260,7 +263,7 @@ def test_window_rule_ignores_a_period_that_lapsed_before_the_start() -> None:
 def test_daily_rest_carrying_compensation_counts_as_reduced() -> None:
     """Art 8(4): a 9 h rest plus the debt it pays is a reduced rest; the fourth one violates."""
     c = counters(compensation_owed=733, compensation_deadline=99999, reduced_daily_rests_used=3)
-    acts = [act("REST", 0, 540 + 733, "daily_rest")]
+    acts = [act("REST", 0, 540 + 733, "daily_rest", compensation_minutes=733)]
     assert _by_code(_rest_findings(acts, c), "REDUCED_DAILY_RESTS_EXCEEDED")
     plain = counters(compensation_owed=733, compensation_deadline=99999)
     from replay.judge_rest import walk_rests

@@ -33,6 +33,7 @@ class Label:
     counts_as_rest: bool = False
     interruptions: tuple[int, ...] = ()  # minutes of each Art 9 interruption (no positions)
     in_vehicle: bool = False
+    compensation_minutes: int = 0  # as declared by the plan's block
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,7 @@ class RestPeriod:
     in_vehicle: bool = False
     prehistory: bool = False
     at: str | None = None
+    declared_compensation: int = 0
 
 
 @dataclass(frozen=True)
@@ -74,4 +76,3 @@ class Switches:
     wait_counts_as_rest: bool = True
     overdue_start_restarts_period: bool = True
     window_reduced: bool = True
-    compensation_en_bloc: bool = True

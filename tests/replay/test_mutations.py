@@ -14,6 +14,7 @@ SOURCES = [
     ROOT / "tests" / "fixtures" / "sim" / "benelux_V1.json",
     ROOT / "tests" / "fixtures" / "sim" / "iberia_V1.json",
     ROOT / "tests" / "fixtures" / "sim" / "mixed_V1.json",
+    ROOT / "tests" / "fixtures" / "sim" / "eu_longhaul_V1.json",
 ]
 
 
@@ -44,6 +45,19 @@ def _mutants(resp: dict):  # type: ignore[no-untyped-def, type-arg]
         m = copy.deepcopy(resp)
         m["blocks"][i]["kind"] = "work"  # the rest never happened
         out.append(("daily rest dropped", m))
+    i = _find(resp, lambda bs, i: bs[i]["kind"] == "weekly_rest")
+    if i is not None:
+        m = copy.deepcopy(resp)
+        _retime(m, i, 1000 - m["blocks"][i]["minutes"])  # a weekly rest under 24 h
+        out.append(("weekly rest under 24 h", m))
+        m = copy.deepcopy(resp)
+        m["blocks"][i]["kind"] = "work"  # the weekly rest never happened
+        out.append(("weekly rest dropped", m))
+    i = _find(resp, lambda bs, i: bs[i].get("subtype") == "split_part_2")
+    if i is not None:
+        m = copy.deepcopy(resp)
+        _retime(m, i, 480 - m["blocks"][i]["minutes"])  # second part of a split rest under 9 h
+        out.append(("split rest second part under 9 h", m))
     i = _find(resp, lambda bs, i: bs[i]["kind"] == "break" and bs[i]["minutes"] >= 45)
     if i is not None:
         m = copy.deepcopy(resp)
@@ -65,6 +79,28 @@ def _mutants(resp: dict):  # type: ignore[no-untyped-def, type-arg]
     return out
 
 
+_REST_CODES = {
+    "DAILY_REST_LATE",
+    "DAILY_REST_MISSING",
+    "DAILY_DRIVING_EXCEEDED",
+    "EXTENDED_DAY_LIMIT",
+    "BREAK_MISSING",
+    "WEEKLY_REST_LATE",
+    "WEEKLY_REST_MISSING",
+    "WEEKLY_DRIVING_EXCEEDED",
+    "FORTNIGHT_DRIVING_EXCEEDED",
+}
+EXPECTED = {  # the violation codes a mutation may legitimately cause
+    "daily rest under 9 h": _REST_CODES,
+    "daily rest dropped": _REST_CODES,
+    "break dropped": {"BREAK_MISSING"},
+    "drive 1 min past 4 h 30": {"BREAK_MISSING"},
+    "weekly rest under 24 h": _REST_CODES,
+    "weekly rest dropped": _REST_CODES,
+    "split rest second part under 9 h": _REST_CODES,
+}
+
+
 def _legaleta_says_illegal(req: dict, resp: dict) -> bool:  # type: ignore[type-arg]
     keep = ("kind", "start", "minutes", "subtype", "at", "counts_as_rest", "interruptions")
     vreq = {k: req[k] for k in ("start", "driver", "rules") if k in req}
@@ -83,12 +119,13 @@ def test_rule_mutants_are_caught() -> None:
                 skipped += 1  # the mutation happens to leave a legal plan
                 continue
             report = replay_plan(req, mutant)
-            assert any(f.cls == "VIOLATION" for f in report.findings), (path.name, name)
+            codes = {f.code for f in report.findings if f.cls == "VIOLATION"}
+            assert codes & EXPECTED[name], (path.name, name, codes)
             caught += 1
             names.add(name)
     assert caught >= 8, (caught, skipped)
     assert skipped <= 0.3 * (caught + skipped), (caught, skipped)
-    assert len(names) >= 3, names
+    assert len(names) >= 5, names
 
 
 def test_claim_mutants_are_caught() -> None:
