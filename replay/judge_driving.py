@@ -118,6 +118,7 @@ def _check_daily(
         (r.end, r.kind.startswith("weekly")) for r in rests if r.kind in _DAILY_BOUNDARY
     )
     i, seg, seg_end, extended = 0, 0, 0, counters.extended_days_used_this_week
+    ext_minute = 0  # the minute the day's driving first passed the 9 h cap
     ext_week = weeks.floor(0)
     seg_prior = (
         False  # the segment holds the start state's driving: its extension is already counted
@@ -125,8 +126,8 @@ def _check_daily(
 
     def close(minute: int) -> None:
         nonlocal seg, extended, seg_prior, ext_week
-        if seg and not seg_prior and weeks.floor(seg_end - 1) != ext_week:
-            ext_week, extended = weeks.floor(seg_end - 1), 0
+        if seg > regs.daily_driving and not seg_prior and weeks.floor(ext_minute) != ext_week:
+            ext_week, extended = weeks.floor(ext_minute), 0
         if seg > regs.daily_driving_extended:
             out.append(
                 Finding(
@@ -159,6 +160,8 @@ def _check_daily(
             i += 1
         if a.kind == "DRIVE":
             seg_end = a.end
+            if seg <= regs.daily_driving < seg + a.minutes:
+                ext_minute = a.start + (regs.daily_driving - seg)
             seg_prior = seg_prior or (a.label.block_index is None and a.start < 0)
             seg += a.minutes
     while i < len(bounds):
