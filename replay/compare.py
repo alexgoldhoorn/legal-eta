@@ -6,13 +6,14 @@ This and `__main__` are the only modules that may import legaleta, and only `leg
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 from legaleta.api import plan_json, validate_json
-from replay.report import Report
+from replay.fuzz import generate
+from replay.report import Report, render_json
 from replay.run import replay_plan
 from replay.types import Finding, Switches
 
@@ -37,6 +38,8 @@ class Result:
     status: Literal["PASS", "FAIL", "SKIP"]
     report: Report | None = None
     detail: str = ""
+    response: dict[str, Any] | None = None
+    request: dict[str, Any] | None = None
 
 
 def plan_for(
@@ -91,11 +94,14 @@ def load_inputs(paths: list[str]) -> Iterator[tuple[str, dict[str, Any], dict[st
             yield f.stem, data, None
 
 
-def run_inputs(
-    paths: list[str], policies: list[str], rules: dict[str, Any] | None, reclassify: bool
+def run_requests(
+    items: Iterable[tuple[str, dict[str, Any], dict[str, Any] | None]],
+    policies: list[str],
+    rules: dict[str, Any] | None,
+    reclassify: bool,
 ) -> list[Result]:
     out: list[Result] = []
-    for name, req, resp in load_inputs(paths):
+    for name, req, resp in items:
         for policy in [None] if resp is not None else policies:
             try:
                 response = resp if resp is not None else plan_for(req, policy, rules)
@@ -106,5 +112,40 @@ def run_inputs(
                 continue
             report = replay_plan(req, response, Switches(), reclassify)
             report.findings.extend(differential(req, response, report))
-            out.append(Result(name, policy, report.verdict, report))
+            out.append(Result(name, policy, report.verdict, report, "", response, req))
     return out
+
+
+def run_inputs(
+    paths: list[str], policies: list[str], rules: dict[str, Any] | None, reclassify: bool
+) -> list[Result]:
+    return run_requests(load_inputs(paths), policies, rules, reclassify)
+
+
+def fuzz_run(
+    seed: int,
+    count: int,
+    policies: list[str],
+    rules: dict[str, Any] | None,
+    reclassify: bool,
+    corpus: Path,
+) -> list[Result]:
+    """Replay generated requests for seeds `seed` to `seed + count - 1`; save failures."""
+    results: list[Result] = []
+    for s in range(seed, seed + count):
+        for r in run_requests([(f"seed{s}", generate(s), None)], policies, rules, reclassify):
+            results.append(r)
+            if r.status == "FAIL" and r.report and r.request and r.response:
+                corpus.mkdir(parents=True, exist_ok=True)
+                (corpus / f"seed{s}_{r.policy}.json").write_text(
+                    json.dumps(
+                        {
+                            "seed": s,
+                            "request": r.request,
+                            "response": r.response,
+                            "findings": render_json(r.report)["findings"],
+                        },
+                        indent=1,
+                    )
+                )
+    return results

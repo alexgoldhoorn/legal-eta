@@ -5,11 +5,13 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
-from replay.compare import Result, run_inputs
+from replay.compare import Result, fuzz_run, run_inputs
 from replay.report import render_json, render_text
 
 POLICIES = ("fastest", "driver_friendly", "strict")
+CORPUS = Path(__file__).parent / "corpus"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -21,6 +23,14 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--rules", help="JSON object of rule overrides")
     run.add_argument("--json", action="store_true", help="machine-readable output")
     run.add_argument("--no-switches", action="store_true", help="skip interpretation re-runs")
+    fz = sub.add_parser("fuzz", help="replay seeded random requests; failures go to the corpus")
+    fz.add_argument("--seed", type=int, default=1)
+    fz.add_argument("--count", type=int, default=100)
+    fz.add_argument("--policy", default=",".join(POLICIES))
+    fz.add_argument("--rules")
+    fz.add_argument("--json", action="store_true")
+    fz.add_argument("--no-switches", action="store_true")
+    fz.add_argument("--corpus", default=str(CORPUS), help="where failing cases are written")
     return p
 
 
@@ -72,7 +82,10 @@ def main(argv: list[str] | None = None) -> int:
     except json.JSONDecodeError as e:
         print(f"--rules is not valid JSON: {e}", file=sys.stderr)
         return 2
-    results = run_inputs(ns.paths, policies, rules, not ns.no_switches)
+    if ns.command == "fuzz":
+        results = fuzz_run(ns.seed, ns.count, policies, rules, not ns.no_switches, Path(ns.corpus))
+    else:
+        results = run_inputs(ns.paths, policies, rules, not ns.no_switches)
     if not results:
         print("no request or pair files found", file=sys.stderr)
         return 2
