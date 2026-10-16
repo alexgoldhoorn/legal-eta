@@ -277,6 +277,7 @@ def walk_rests(  # noqa: C901
                     )
                 )
         ps = last_daily_end = r.end
+        paid = 0
         for d in sorted(debts, key=lambda d: (d.due is None, d.due or 0)):
             if cap <= 0:
                 break
@@ -285,7 +286,21 @@ def walk_rests(  # noqa: C901
             pay = d.amount if cap >= d.amount else (0 if sw.compensation_en_bloc else cap)
             d.amount -= pay
             cap -= pay
+            paid += pay
         debts = [d for d in debts if d.amount > 0]
+        if r.kind == "daily_regular" and paid and e - paid < regs.daily_rest_regular:
+            reduced_used += 1  # a 9 h rest plus the debt it carries is a reduced daily rest
+            if reduced_used > regs.reduced_daily_rests_between_weekly:
+                out.append(
+                    _v(
+                        "REDUCED_DAILY_RESTS_EXCEEDED",
+                        "Art 8(4)",
+                        f"reduced daily rest {reduced_used} of at most "
+                        f"{regs.reduced_daily_rests_between_weekly}",
+                        r.start,
+                        1,
+                    )
+                )
 
     for d in debts:
         if d.due is not None and log_end >= d.due:

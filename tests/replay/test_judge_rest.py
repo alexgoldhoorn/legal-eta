@@ -255,3 +255,16 @@ def test_window_rule_ignores_a_period_that_lapsed_before_the_start() -> None:
     assert _kinds(long_rest, Switches(overdue_start_restarts_period=False), ps=-1338) == [
         "daily_reduced"
     ]
+
+
+def test_daily_rest_carrying_compensation_counts_as_reduced() -> None:
+    """Art 8(4): a 9 h rest plus the debt it pays is a reduced rest; the fourth one violates."""
+    c = counters(compensation_owed=733, compensation_deadline=99999, reduced_daily_rests_used=3)
+    acts = [act("REST", 0, 540 + 733, "daily_rest")]
+    assert _by_code(_rest_findings(acts, c), "REDUCED_DAILY_RESTS_EXCEEDED")
+    plain = counters(compensation_owed=733, compensation_deadline=99999)
+    from replay.judge_rest import walk_rests
+
+    rests = recognise_rests(acts, Regs(), SW, 0)
+    _, end = walk_rests(acts, rests, Regs(), SW, plain, weeks())
+    assert end.reduced_used == 1 and end.owed == 0
