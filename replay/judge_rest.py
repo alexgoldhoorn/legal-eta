@@ -36,8 +36,8 @@ class _Merged:
 def _merge(acts: list[Activity]) -> list[_Merged]:
     out: list[_Merged] = []
     for a in acts:
-        if a.kind != "REST" or a.end == a.start:
-            continue
+        if a.kind != "REST" or a.end == a.start or a.label.block_kind == "ferry":
+            continue  # a ferry without a cabin counts as a break (Art 7) only, never as a rest
         pre = a.label.subtype == PREHISTORY_REST
         if out and out[-1].end == a.start:
             m = out[-1]

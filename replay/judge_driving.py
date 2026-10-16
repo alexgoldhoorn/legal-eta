@@ -38,7 +38,7 @@ def walk_driving(
     weeks: Weeks,
 ) -> tuple[list[Finding], DrivingEnd]:
     f1, since, pending = _check_breaks(acts, regs)
-    f2, extended, today = _check_daily(acts, regs, rests, counters)
+    f2, extended, today = _check_daily(acts, regs, rests, counters, weeks)
     f3, this_week, last_week = _check_weekly(acts, regs, counters, weeks)
     return [*f1, *f2, *f3], DrivingEnd(since, pending, today, extended, this_week, last_week)
 
@@ -106,20 +106,27 @@ def _more(f: Finding, excess: int) -> Finding:
 
 
 def _check_daily(
-    acts: list[Activity], regs: Regs, rests: list[RestPeriod], counters: StartCounters
+    acts: list[Activity],
+    regs: Regs,
+    rests: list[RestPeriod],
+    counters: StartCounters,
+    weeks: Weeks,
 ) -> tuple[list[Finding], int, int]:
-    """Art 6(1): driving between daily rests, 10 h at most twice between weekly rests."""
+    """Art 6(1): driving between daily rests, 10 h at most twice in a calendar week."""
     out: list[Finding] = []
     bounds = sorted(
         (r.end, r.kind.startswith("weekly")) for r in rests if r.kind in _DAILY_BOUNDARY
     )
     i, seg, seg_start, extended = 0, 0, 0, counters.extended_days_used_this_week
+    ext_week = weeks.floor(0)
     seg_prior = (
         False  # the segment holds the start state's driving: its extension is already counted
     )
 
     def close(minute: int) -> None:
-        nonlocal seg, extended, seg_prior
+        nonlocal seg, extended, seg_prior, ext_week
+        if seg and not seg_prior and weeks.floor(seg_start) != ext_week:
+            ext_week, extended = weeks.floor(seg_start), 0
         if seg > regs.daily_driving_extended:
             out.append(
                 Finding(
@@ -149,8 +156,6 @@ def _check_daily(
     for a in acts:
         while i < len(bounds) and bounds[i][0] <= a.start:
             close(bounds[i][0])
-            if bounds[i][1]:
-                extended = 0
             i += 1
         if a.kind == "DRIVE":
             if seg == 0:
@@ -159,12 +164,12 @@ def _check_daily(
             seg += a.minutes
     while i < len(bounds):
         close(bounds[i][0])
-        if bounds[i][1]:
-            extended = 0
         i += 1
     open_today = seg
     if seg:
         close(seg_start)
+    if ext_week != weeks.floor(acts[-1].end if acts else 0):
+        extended = 0
     return out, extended, open_today
 
 

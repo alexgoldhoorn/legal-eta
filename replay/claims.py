@@ -155,7 +155,10 @@ def _warnings(c, request, response, log, regs, sw) -> None:  # type: ignore[no-u
         c.checked += 1
         if code not in have:
             c.add("MISSING_WARNING", f"MISSING_{code}", f"warning {code} must appear on every plan")
-    counted_wait = any(a.label.counts_as_rest and a.kind == "REST" for a in log.activities)
+    counted_wait = any(
+        a.label.counts_as_rest and a.kind == "REST" and a.label.block_kind in ("wait", "break")
+        for a in log.activities
+    )
     on_road = any(
         a.label.block_kind == "weekly_rest"
         and a.label.at is None

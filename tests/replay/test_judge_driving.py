@@ -137,3 +137,20 @@ def test_boundary_rest_resets_daily_segment() -> None:
     a1, r1, t = day(0, 540)
     a2, r2, t = day(t, 540)
     assert _check(a1 + a2, r1 + r2) == []
+
+
+def test_extended_days_count_per_calendar_week_not_per_weekly_rest() -> None:
+    """Art 6(1): the 10 h extension is allowed twice during the (calendar) week."""
+    # origin Saturday 2026-10-17 06:00 local: day 1 is Saturday, days 3 and 4 are Mon/Tue
+    from datetime import datetime
+
+    from tests.replay.helpers import TZ
+
+    origin = datetime(2026, 10, 17, 6, 0, tzinfo=TZ)
+    acts, rests, t = [], [], 0
+    for drive in (570, 480, 480, 570, 570):  # Sat, Sun, Mon... see below
+        a, r, t = day(t, drive)
+        acts += a
+        rests += r
+    # extended days land on Sat (week 1) and on day 4 and 5 (Tue/Wed, week 2): two per week
+    assert [f.code for f in _check(acts, rests, origin=origin) if f.article == "Art 6(1)"] == []

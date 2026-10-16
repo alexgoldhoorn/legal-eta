@@ -111,6 +111,10 @@ def run_requests(
                 out.append(Result(name, policy, "SKIP", None, f"{type(e).__name__}: {e}"))
                 continue
             report = replay_plan(req, response, Switches(), reclassify)
+            if any(f.code == "STATE_UNREPRESENTABLE" for f in report.findings):
+                detail = "start state cannot be laid out as a prior log"
+                out.append(Result(name, policy, "SKIP", report, detail, response, req))
+                continue
             report.findings.extend(differential(req, response, report))
             out.append(Result(name, policy, report.verdict, report, "", response, req))
     return out

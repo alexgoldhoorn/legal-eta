@@ -186,3 +186,12 @@ def test_900_hour_route_is_linear() -> None:
     start = time.perf_counter()
     _judge(acts)
     assert time.perf_counter() - start < 2.0
+
+
+def test_ferry_break_does_not_join_a_daily_rest() -> None:
+    """A crossing without a cabin is a break only: it must not merge into a 9 h rest."""
+    acts = [act("REST", 0, 556, counts_as_rest=True), act("REST", 556, 586)]
+    ferry = acts[0].__class__(
+        acts[0].kind, 0, 556, acts[0].label.__class__(None, "ferry", counts_as_rest=True)
+    )
+    assert _kinds([ferry, acts[1]]) == []
