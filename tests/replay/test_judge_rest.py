@@ -237,3 +237,12 @@ def test_regular_weekly_rest_interrupted_only_on_a_long_ferry_with_cabin() -> No
     assert _by_code(_rest_findings(rest_, ferries={"F": (600, False)}), code)
     assert _by_code(_rest_findings(rest_, ferries={"F": (400, True)}), code)
     assert _by_code(_rest_findings(rest_), code)
+
+
+def test_daily_rest_of_9h_plus_the_debt_pays_compensation() -> None:
+    """Art 8(6b): compensation attached to a rest of at least 9 h (a 9 h rest + 388 min)."""
+    c = counters(compensation_owed=388, compensation_deadline=2000)
+    paid = [act("REST", 0, 928, "daily_rest"), act("AVAIL", 928, 2100)]
+    assert _by_code(_rest_findings(paid, c), "COMPENSATION_UNPAID") == []
+    short = [act("REST", 0, 900, "daily_rest"), act("AVAIL", 900, 2100)]
+    assert _by_code(_rest_findings(short, c), "COMPENSATION_UNPAID")

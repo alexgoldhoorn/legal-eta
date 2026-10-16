@@ -233,8 +233,7 @@ def walk_rests(  # noqa: C901
                             1,
                         )
                     )
-            elif r.kind == "daily_regular":
-                cap = e - regs.daily_rest_regular
+            cap = e - regs.daily_rest_reduced  # Art 8(6b): attached to a rest of at least 9 h
         if r.interruptions:
             crossing, cabin = (ferries or {}).get(r.at or "", (0, False))
             ok = r.kind in ("daily_regular", "weekly_reduced") or (
