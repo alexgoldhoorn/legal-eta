@@ -138,6 +138,19 @@ Tested with `mcp` 2.x.
 CI also requires 100 % line coverage on `rules.py`, `state.py` and `checker.py`
 (`scripts/check_coverage.py`).
 
+## Replay: an independent check of the plans
+
+`replay/` executes a plan as a driver would, minute by minute, keeps its own record against its own
+copy of the regulation, and reports every place where plan and replay disagree (a rule broken, a time
+or total the plan claims that the replay does not reproduce, a warning that is missing). It shares no
+code with the scheduler or the checker. It is a test tool and is not shipped in the wheel.
+
+    uv run python -m replay run tests/fixtures/sim examples      # plan and replay request files
+    uv run python -m replay run pair.json                        # replay a given plan: {"request", "response"}
+    uv run python -m replay fuzz --seed 1 --count 100            # seeded random requests
+
+See `docs/replay.md`. What it found so far: `replay/FINDINGS.md`.
+
 ## Licence
 
 AGPL-3.0-or-later. Commercial licences: see `COMMERCIAL-LICENSE.md`. Provenance: `PROVENANCE.md`.

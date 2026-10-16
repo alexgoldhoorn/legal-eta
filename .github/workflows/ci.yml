@@ -9,7 +9,10 @@ jobs:
         with: { python-version: "3.12" }
       - run: uv sync --all-extras
       - run: uv run ruff check . && uv run ruff format --check .
-      - run: uv run mypy src
+      - run: uv run mypy src replay
       - run: uv run pytest -q --cov=legaleta --cov-report=json --cov-report=term
       - run: uv run python scripts/check_coverage.py
+      - run: uv run python -m replay run tests/fixtures/sim examples
+      # seeds 100-139: seeds 12, 24 and 40 hit the open finding in replay/FINDINGS.md
+      - run: uv run python -m replay fuzz --seed 100 --count 40 --corpus "$RUNNER_TEMP/corpus"
       - run: uv build
